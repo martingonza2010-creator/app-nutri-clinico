@@ -8880,6 +8880,40 @@ window.formatPatientNameFirst = function(nameStr) {
     return clean;
 };
 
+function isSamePatientOrMatch(pA, pB) {
+    if (!pA || !pB) return false;
+    const nameA = (pA.nombre || '').trim();
+    const nameB = (pB.nombre || '').trim();
+    if (!nameA || !nameB) return false;
+
+    // Direct case-insensitive match
+    if (nameA.toUpperCase() === nameB.toUpperCase()) return true;
+
+    // Check ficha if both present
+    const fA = (pA.num_ficha || pA.metadata?.num_ficha || '').toString().trim();
+    const fB = (pB.num_ficha || pB.metadata?.num_ficha || '').toString().trim();
+    if (fA && fB && fA.length >= 3 && fA === fB) return true;
+
+    // Name token comparison ignoring accents, punctuation and short words
+    const cleanTokens = (str) => {
+        return str.toLowerCase()
+            .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9\s]/g, ' ')
+            .split(/\s+/)
+            .filter(w => w.length > 2 && !['del', 'las', 'los', 'san', 'santa', 'edad'].includes(w));
+    };
+
+    const tokensA = cleanTokens(nameA);
+    const tokensB = cleanTokens(nameB);
+    if (tokensA.length === 0 || tokensB.length === 0) return false;
+
+    const common = tokensA.filter(t => tokensB.includes(t));
+    if (common.length >= 2) return true;
+    if (common.length >= 1 && (tokensA.length === 1 || tokensB.length === 1)) return true;
+
+    return false;
+}
+
 function parseDietoolsOCRText(ocrText, bedsList) {
     console.log("--- DIETOOLS PARSER INPUT ---", ocrText);
     const fixedText = fixDietoolsEncoding(ocrText);
@@ -8889,16 +8923,42 @@ function parseDietoolsOCRText(ocrText, bedsList) {
     let currentBedKey = null;
 
     rawLines.forEach(line => {
-        // 1. Check if line starts with a bed code and ficha: "501_01 - 759430 ..." or "501-1 - 759430 ..."
-        const bedFichaMatch = line.match(/^([A-Z0-9]+[_\-\s]\d{1,2})\s*-\s*(\d{4,8})/i);
+        // 1. Check if line starts with a bed code and optional ficha:
+        // Handles hyphens, colons, tabs, and spaces (e.g., "501_01 - 759430", "501-1\t759430", "Cupo 1 - 759430", "AR 1\t759430")
+        let rawBed = '';
+        let ficha = '';
+        let restOfLine = '';
 
-        if (bedFichaMatch) {
-            const rawBed = bedFichaMatch[1];
-            const ficha = bedFichaMatch[2];
+        const bedMatchGeneral = line.match(/^((?:CAMA\s+|BOX\s+|CUPO\s+|AR\s+|UCI\s+|TIM\s+|UCO\s+|ONCO\s+)?[A-Z0-9]+[_\-\s]?\d{0,2})\s*[\-\:\t]\s*(\d{4,9})(.*)$/i)
+            || line.match(/^([A-Z0-9]+[_\-\s]\d{1,2})\s+(\d{4,9})(.*)$/i);
+
+        if (bedMatchGeneral) {
+            rawBed = bedMatchGeneral[1].trim();
+            ficha = bedMatchGeneral[2].trim();
+            restOfLine = bedMatchGeneral[3] || '';
+        } else if (Array.isArray(bedsList)) {
+            // Check if line starts with any known bed name from bedsList
+            for (const b of bedsList) {
+                const escaped = b.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+                const prefixM = line.match(new RegExp(`^(?:CAMA\\s+)?(${escaped})\\s*([\\-\\:\\t\\s])\\s*(.*)$`, 'i'));
+                if (prefixM) {
+                    rawBed = b;
+                    const remainder = prefixM[3].trim();
+                    const fM = remainder.match(/^(\d{4,9})\s*(.*)$/);
+                    if (fM) {
+                        ficha = fM[1];
+                        restOfLine = fM[2];
+                    } else {
+                        restOfLine = remainder;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if (rawBed) {
             const normBedKey = normalizeBedCode(rawBed);
             currentBedKey = normBedKey;
-
-            const restOfLine = line.substring(bedFichaMatch[0].length);
 
             // Extract Name and Edad
             let name = '';
@@ -8918,7 +8978,7 @@ function parseDietoolsOCRText(ocrText, bedsList) {
 
             // Clean name from status codes or trailing tabs
             name = name.replace(/\s*-\s*[NS]\s+[NS]$/i, '').replace(/[\t\r\n]/g, '').trim();
-            name = window.formatPatientNameFirst(name);
+            name = window.formatPatientNameFirst ? window.formatPatientNameFirst(name) : name;
 
             if (name.length <= 2) {
                 const wordsM = restOfLine.match(/([A-ZÑÁÉÍÓÚ]{3,}(?:\s+[A-ZÑÁÉÍÓÚ]{2,}){1,4})/i);
@@ -8976,7 +9036,17 @@ function parseDietoolsOCRText(ocrText, bedsList) {
     // Map results back to current ward's bedsList
     return bedsList.map(bedName => {
         const normTargetBed = normalizeBedCode(bedName);
-        const matchData = parsedPatientsMap[normTargetBed];
+        let matchData = parsedPatientsMap[normTargetBed];
+
+        if (!matchData) {
+            const targetDigits = bedName.replace(/[^0-9]/g, '');
+            for (const k in parsedPatientsMap) {
+                if (targetDigits.length > 0 && k.replace(/[^0-9]/g, '') === targetDigits) {
+                    matchData = parsedPatientsMap[k];
+                    break;
+                }
+            }
+        }
 
         if (matchData) {
             return {
@@ -9056,6 +9126,20 @@ async function showCensusReviewModal(extracted, bedsList, activeLoc) {
             activePatients = data.filter(p => p.estado_sala !== 'de_alta' && p.estado_sala !== 'eliminado');
         }
     }
+
+    // Merge local storage cache safely so we don't miss active local patients
+    try {
+        const localCache = JSON.parse(localStorage.getItem('local_ward_patients') || '[]');
+        localCache.forEach(lp => {
+            if (!lp || lp.estado_sala === 'de_alta' || lp.estado_sala === 'eliminado') return;
+            const idx = activePatients.findIndex(ap => (ap.id === lp.id) || (ap.cama && lp.cama && ap.cama.trim().toUpperCase() === lp.cama.trim().toUpperCase()));
+            if (idx >= 0) {
+                activePatients[idx] = { ...activePatients[idx], ...lp };
+            } else {
+                activePatients.push(lp);
+            }
+        });
+    } catch(e) {}
     
     const matchedPatients = activePatients.filter(p => {
         if (p.metadata && p.metadata.location && p.metadata.location.serviceId) {
@@ -9071,46 +9155,68 @@ async function showCensusReviewModal(extracted, bedsList, activeLoc) {
     window.pendingCensusChanges = [];
     
     let hasChanges = false;
+    let keptCount = 0;
     
     bedsList.forEach(bedName => {
         const currentPat = matchedPatients.find(p => p.cama === bedName);
         const extPat = extracted.find(e => e.cama === bedName);
-        const extName = extPat ? extPat.nombre.trim().toUpperCase() : '';
-        const currentName = currentPat ? currentPat.nombre.trim().toUpperCase() : '';
+        const hasExtData = extPat && extPat.nombre && extPat.nombre.trim() !== '';
         
-        if (currentName !== extName) {
-            if (currentName && !extName) {
-                hasChanges = true;
-                window.pendingCensusChanges.push({ type: 'discharge', bed: bedName, patientId: currentPat.id, name: currentPat.nombre });
-                changesListEl.innerHTML += `
-                    <div style="display:flex; justify-content:space-between; align-items:center; background:#fdf2e9; border:1px solid #fadbd8; border-radius:8px; padding:10px 12px; font-size:0.85rem; color:#d35400;">
-                        <div><strong style="color:#b9770e;">🔴 Alta:</strong> Cama <b>${bedName}</b></div>
-                        <div><b>${currentPat.nombre}</b></div>
-                    </div>`;
-            } else if (!currentName && extName) {
+        if (!currentPat && hasExtData) {
+            // New patient admission
+            hasChanges = true;
+            window.pendingCensusChanges.push({
+                type: 'admission',
+                bed: bedName,
+                name: extPat.nombre.trim(),
+                num_ficha: extPat.num_ficha || '',
+                edad: extPat.edad ? parseInt(extPat.edad) : 0,
+                regimen: extPat.regimen || '',
+                patologia_dm: !!extPat.patologia_dm,
+                observaciones: extPat.observaciones || ''
+            });
+            changesListEl.innerHTML += `
+                <div style="display:flex; justify-content:space-between; align-items:center; background:#e8f8f5; border:1px solid #a3e4d7; border-radius:8px; padding:10px 12px; font-size:0.85rem; color:#16a085;">
+                    <div><strong style="color:#117a65;">🟢 Nuevo Ingreso:</strong> Cama <b>${bedName}</b> ${extPat.num_ficha ? '(Ficha: ' + extPat.num_ficha + ')' : ''}</div>
+                    <div><b>${extPat.nombre}</b></div>
+                </div>`;
+        } else if (currentPat && hasExtData) {
+            if (isSamePatientOrMatch(currentPat, extPat)) {
+                // Same patient! Update diet/regimen/ficha without discharging
+                const newRegimen = extPat.regimen && extPat.regimen !== currentPat.metadata?.regimen;
+                const newFicha = extPat.num_ficha && extPat.num_ficha !== (currentPat.metadata?.num_ficha || '');
+                const newDm = extPat.patologia_dm !== !!currentPat.metadata?.patologia_dm;
+                const newObs = extPat.observaciones && extPat.observaciones !== (currentPat.metadata?.observaciones_generales || '');
+
+                if (newRegimen || newFicha || newDm || newObs) {
+                    hasChanges = true;
+                    window.pendingCensusChanges.push({
+                        type: 'update',
+                        bed: bedName,
+                        patientId: currentPat.id,
+                        name: currentPat.nombre,
+                        num_ficha: extPat.num_ficha || currentPat.metadata?.num_ficha || '',
+                        edad: extPat.edad || currentPat.edad || 0,
+                        regimen: extPat.regimen || currentPat.metadata?.regimen || '',
+                        patologia_dm: extPat.patologia_dm !== undefined ? extPat.patologia_dm : !!currentPat.metadata?.patologia_dm,
+                        observaciones: extPat.observaciones || currentPat.metadata?.observaciones_generales || ''
+                    });
+                    changesListEl.innerHTML += `
+                        <div style="display:flex; justify-content:space-between; align-items:center; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px 12px; font-size:0.85rem; color:#1d4ed8;">
+                            <div><strong style="color:#1e40af;">🔄 Actualización:</strong> Cama <b>${bedName}</b> (Mismo paciente)</div>
+                            <div><b>${currentPat.nombre}</b> ${extPat.regimen ? '<span style="font-size:0.75rem; color:#475569;">(' + extPat.regimen + ')</span>' : ''}</div>
+                        </div>`;
+                }
+            } else {
+                // Different patient in bed: Move current patient to "Pacientes que ya no están en el servicio" (cama: '')
+                // NEVER discharge automatically!
                 hasChanges = true;
                 window.pendingCensusChanges.push({
-                    type: 'admission',
+                    type: 'replace',
                     bed: bedName,
-                    name: extName,
-                    num_ficha: extPat.num_ficha || '',
-                    edad: extPat.edad ? parseInt(extPat.edad) : 0,
-                    regimen: extPat.regimen || '',
-                    patologia_dm: !!extPat.patologia_dm,
-                    observaciones: extPat.observaciones || ''
-                });
-                changesListEl.innerHTML += `
-                    <div style="display:flex; justify-content:space-between; align-items:center; background:#e8f8f5; border:1px solid #a3e4d7; border-radius:8px; padding:10px 12px; font-size:0.85rem; color:#16a085;">
-                        <div><strong style="color:#117a65;">🟢 Ingreso:</strong> Cama <b>${bedName}</b> ${extPat.num_ficha ? '(Ficha: ' + extPat.num_ficha + ')' : ''}</div>
-                        <div><b>${extName}</b></div>
-                    </div>`;
-            } else if (currentName && extName) {
-                hasChanges = true;
-                window.pendingCensusChanges.push({ type: 'discharge', bed: bedName, patientId: currentPat.id, name: currentPat.nombre });
-                window.pendingCensusChanges.push({
-                    type: 'admission',
-                    bed: bedName,
-                    name: extName,
+                    oldPatientId: currentPat.id,
+                    oldName: currentPat.nombre,
+                    name: extPat.nombre.trim(),
                     num_ficha: extPat.num_ficha || '',
                     edad: extPat.edad ? parseInt(extPat.edad) : 0,
                     regimen: extPat.regimen || '',
@@ -9120,41 +9226,39 @@ async function showCensusReviewModal(extracted, bedsList, activeLoc) {
                 changesListEl.innerHTML += `
                     <div style="display:flex; flex-direction:column; gap:6px; background:#fef9e7; border:1px solid #fdebd0; border-radius:8px; padding:10px 12px; font-size:0.85rem; color:#b7950b;">
                         <div style="display:flex; justify-content:space-between;">
-                            <div><strong style="color:#b9770e;">🔴 Alta (relevo):</strong> Cama <b>${bedName}</b></div>
-                            <div><b>${currentPat.nombre}</b></div>
+                            <div><strong style="color:#b9770e;">🔄 Relevo de Cama:</strong> Cama <b>${bedName}</b></div>
+                            <div><b>${extPat.nombre}</b></div>
                         </div>
-                        <div style="display:flex; justify-content:space-between; border-top:1px dashed #fdebd0; padding-top:4px; margin-top:4px;">
-                            <div><strong style="color:#117a65;">🟢 Ingreso (relevo):</strong> Cama <b>${bedName}</b> ${extPat.num_ficha ? '(Ficha: ' + extPat.num_ficha + ')' : ''}</div>
-                            <div><b>${extName}</b></div>
+                        <div style="font-size:0.75rem; color:#78350f; border-top:1px dashed #fdebd0; padding-top:4px;">
+                            ℹ️ <i>${currentPat.nombre}</i> se traslada a "Pacientes que ya no están en el servicio" (no se da de alta).
                         </div>
                     </div>`;
             }
+        } else if (currentPat && !hasExtData) {
+            // Patient currently in bed, but DieTools didn't list this bed:
+            // ALWAYS KEEP THE PATIENT IN BED! NEVER AUTO-DISCHARGE!
+            keptCount++;
         }
     });
-    
-    const floatingInService = matchedPatients.filter(p => !bedsList.includes(p.cama));
-    if (floatingInService.length > 0) {
+
+    if (keptCount > 0) {
         changesListEl.innerHTML += `
-            <div style="margin-top:12px; background:#fff1f2; border:1px solid #fecdd3; border-radius:8px; padding:10px 12px;">
-                <label style="display:flex; align-items:center; gap:8px; font-size:0.82rem; font-weight:700; color:#be123c; cursor:pointer;">
-                    <input type="checkbox" id="chkAutoDischargeFloatingInCensus" checked style="width:16px; height:16px; accent-color:#be123c;">
-                    🧹 Dar de alta automáticamente a los ${floatingInService.length} paciente(s) sin cama al aplicar este censo
-                </label>
-            </div>
-        `;
+            <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:8px 12px; font-size:0.8rem; color:#475569;">
+                🛡️ <b>${keptCount} paciente(s)</b> continúan en sus camas asignadas (no se dan de alta automáticamente).
+            </div>`;
     }
 
-    if (!hasChanges && floatingInService.length === 0) {
+    if (!hasChanges) {
         const anyExtracted = extracted.some(e => e.nombre && e.nombre.trim() !== '');
         if (!anyExtracted && matchedPatients.length === 0) {
             changesListEl.innerHTML = `
                 <div style="background:#fff3cd; border:1px solid #ffeeba; border-radius:8px; padding:15px; color:#856404; font-size:0.85rem; text-align:center;">
-                    <p style="margin:0 0 8px 0; font-weight:700;">⚠️ No se leyeron nombres en la imagen.</p>
-                    <p style="margin:0 0 12px 0; font-size:0.8rem;">La captura puede estar con reflejos. Puedes pegar el texto copiado de Dietools o reintentar:</p>
-                    <button class="btn-micro" style="background:#059669; color:white; font-weight:700; padding:8px 16px; border-radius:6px; cursor:pointer;" onclick="window.closeCensusReviewModal(); window.openPasteCensusModal();">📋 Pegar Texto Dietools</button>
+                    <p style="margin:0 0 8px 0; font-weight:700;">⚠️ No se leyeron camas o nombres en el texto pegado.</p>
+                    <p style="margin:0 0 12px 0; font-size:0.8rem;">Verifica que el texto contenga el formato de la planilla de Dietools.</p>
+                    <button class="btn-micro" style="background:#059669; color:white; font-weight:700; padding:8px 16px; border-radius:6px; cursor:pointer;" onclick="window.closeCensusReviewModal(); window.openPasteCensusModal();">📋 Reintentar Pegar Texto</button>
                 </div>`;
         } else {
-            changesListEl.innerHTML = '<p style="text-align:center; opacity:0.6; padding: 20px 0;">El censo de la captura coincide exactamente con los pacientes registrados. No se requieren cambios.</p>';
+            changesListEl.innerHTML = '<p style="text-align:center; color:#475569; padding: 20px 0;">Todos los pacientes registrados coinciden con los datos de Dietools. No se requieren cambios.</p>';
         }
     }
     
@@ -9163,26 +9267,15 @@ async function showCensusReviewModal(extracted, bedsList, activeLoc) {
 }
 
 window.applyCensusChanges = async function() {
-    const chkAutoDischarge = document.getElementById('chkAutoDischargeFloatingInCensus');
-    const shouldDischargeFloating = chkAutoDischarge && chkAutoDischarge.checked;
-
-    if ((!window.pendingCensusChanges || window.pendingCensusChanges.length === 0) && !shouldDischargeFloating) {
+    if (!window.pendingCensusChanges || window.pendingCensusChanges.length === 0) {
         const modal = document.getElementById('censusReviewModal');
         if (modal) modal.classList.remove('active');
         return;
     }
     
-    // 1. Close modal instantly!
+    // 1. Close modal instantly
     const modal = document.getElementById('censusReviewModal');
     if (modal) modal.classList.remove('active');
-
-    if (shouldDischargeFloating) {
-        setTimeout(() => {
-            if (typeof window.dischargeAllFloatingPatients === 'function') {
-                window.dischargeAllFloatingPatients(true);
-            }
-        }, 150);
-    }
 
     const activeLocStr = localStorage.getItem('activeLocation');
     const activeLoc = activeLocStr ? JSON.parse(activeLocStr) : { floor: 7, serviceId: 'ala_d', serviceName: 'Ala D' };
@@ -9195,14 +9288,19 @@ window.applyCensusChanges = async function() {
     }
 
     let currentUserId = AppState?.user?.id;
+    if (!currentUserId && supabaseClient) {
+        try {
+            const { data: uData } = await supabaseClient.auth.getUser();
+            if (uData && uData.user) currentUserId = uData.user.id;
+        } catch(e) {}
+    }
+
     const pending = [...window.pendingCensusChanges];
     window.pendingCensusChanges = [];
 
     // 2. Update local storage cache INSTANTLY
     pending.forEach(change => {
-        if (change.type === 'discharge') {
-            localPatients = localPatients.filter(p => p.id !== change.patientId && p.cama !== change.bed);
-        } else if (change.type === 'admission') {
+        if (change.type === 'admission') {
             const formattedName = window.formatPatientNameFirst ? window.formatPatientNameFirst(change.name) : change.name;
             const newPatientData = {
                 id: 'pat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -9233,6 +9331,53 @@ window.applyCensusChanges = async function() {
             };
             localPatients = localPatients.filter(p => p.cama !== change.bed);
             localPatients.push(newPatientData);
+        } else if (change.type === 'update') {
+            const pat = localPatients.find(p => p.id === change.patientId || p.cama === change.bed);
+            if (pat) {
+                pat.metadata = pat.metadata || {};
+                if (change.num_ficha) pat.metadata.num_ficha = change.num_ficha;
+                if (change.regimen) pat.metadata.regimen = change.regimen;
+                if (change.patologia_dm !== undefined) pat.metadata.patologia_dm = change.patologia_dm;
+                if (change.observaciones) pat.metadata.observaciones_generales = change.observaciones;
+                if (change.edad) pat.edad = change.edad;
+            }
+        } else if (change.type === 'replace') {
+            // Previous patient moves to floating (cama: '') without discharging
+            const oldPat = localPatients.find(p => p.id === change.oldPatientId || p.cama === change.bed);
+            if (oldPat) {
+                oldPat.cama = '';
+            }
+            // Admit new patient to bed
+            const formattedName = window.formatPatientNameFirst ? window.formatPatientNameFirst(change.name) : change.name;
+            const newPatientData = {
+                id: 'pat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+                nombre: formattedName,
+                edad: change.edad || 0,
+                peso_kg: 0,
+                estatura_m: 0,
+                sexo: 'm',
+                actividad: 1.2,
+                diagnostico: '',
+                cama: change.bed,
+                estado_sala: 'activo',
+                tmt: 0,
+                ia_report: null,
+                created_at: new Date().toISOString(),
+                user_id: currentUserId || null,
+                metadata: {
+                    num_ficha: change.num_ficha || '',
+                    regimen: change.regimen || '',
+                    patologia_dm: !!change.patologia_dm,
+                    observaciones_generales: change.observaciones || '',
+                    location: {
+                        floor: activeLoc.floor,
+                        serviceId: activeLoc.serviceId,
+                        serviceName: activeLoc.serviceName
+                    }
+                }
+            };
+            localPatients = localPatients.filter(p => (oldPat && p.id === oldPat.id) ? true : p.cama !== change.bed);
+            localPatients.push(newPatientData);
         }
     });
 
@@ -9240,54 +9385,106 @@ window.applyCensusChanges = async function() {
     
     // 3. Render table INSTANTLY!
     await window.renderWardBedsGrid();
-    showToast("🎉 ¡Censo asignado a las camas en tiempo récord!");
+    showToast("🎉 ¡Censo sincronizado exitosamente sin perder pacientes!");
 
-    // 4. Background non-blocking sync to Supabase
+    // 4. Fast Parallel Sync to Supabase
     if (supabaseClient) {
         (async () => {
-            for (const change of pending) {
-                try {
-                    if (change.type === 'discharge') {
-                        if (change.patientId) {
-                            await supabaseClient.from('pacientes').update({ estado_sala: 'de_alta' }).eq('id', change.patientId);
-                        }
-                    } else if (change.type === 'admission') {
-                        const formattedName = window.formatPatientNameFirst ? window.formatPatientNameFirst(change.name) : change.name;
-                        const { data: existingBedPat } = await supabaseClient
-                            .from('pacientes')
-                            .select('id')
-                            .eq('cama', change.bed)
-                            .neq('estado_sala', 'de_alta')
-                            .maybeSingle();
-
-                        const dbPayload = {
-                            nombre: formattedName,
-                            edad: change.edad || 0,
-                            cama: change.bed,
-                            estado_sala: 'activo',
-                            user_id: currentUserId || null,
-                            metadata: {
-                                num_ficha: change.num_ficha || '',
-                                regimen: change.regimen || '',
-                                patologia_dm: !!change.patologia_dm,
-                                observaciones_generales: change.observaciones || '',
-                                location: {
-                                    floor: activeLoc.floor,
-                                    serviceId: activeLoc.serviceId,
-                                    serviceName: activeLoc.serviceName
+            try {
+                const tasks = pending.map(async (change) => {
+                    try {
+                        if (change.type === 'admission') {
+                            const formattedName = window.formatPatientNameFirst ? window.formatPatientNameFirst(change.name) : change.name;
+                            const dbPayload = {
+                                nombre: formattedName,
+                                edad: change.edad || 0,
+                                cama: change.bed,
+                                estado_sala: 'activo',
+                                user_id: currentUserId || null,
+                                metadata: {
+                                    num_ficha: change.num_ficha || '',
+                                    regimen: change.regimen || '',
+                                    patologia_dm: !!change.patologia_dm,
+                                    observaciones_generales: change.observaciones || '',
+                                    location: {
+                                        floor: activeLoc.floor,
+                                        serviceId: activeLoc.serviceId,
+                                        serviceName: activeLoc.serviceName
+                                    }
                                 }
+                            };
+                            const { data: inserted, error } = await supabaseClient.from('pacientes').insert([dbPayload]).select('id, created_at').single();
+                            if (!error && inserted) {
+                                try {
+                                    let curCache = JSON.parse(localStorage.getItem('local_ward_patients') || '[]');
+                                    const matchItem = curCache.find(p => p.cama === change.bed && p.nombre === formattedName);
+                                    if (matchItem) {
+                                        matchItem.id = inserted.id;
+                                        matchItem.created_at = inserted.created_at;
+                                        localStorage.setItem('local_ward_patients', JSON.stringify(curCache));
+                                    }
+                                } catch(e) {}
                             }
-                        };
-
-                        if (existingBedPat && existingBedPat.id) {
-                            await supabaseClient.from('pacientes').update(dbPayload).eq('id', existingBedPat.id);
-                        } else {
-                            await supabaseClient.from('pacientes').insert([dbPayload]);
+                        } else if (change.type === 'update') {
+                            const dbId = change.patientId;
+                            if (dbId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dbId)) {
+                                const { data: existing } = await supabaseClient.from('pacientes').select('metadata').eq('id', dbId).maybeSingle();
+                                const meta = { ...(existing?.metadata || {}) };
+                                if (change.num_ficha) meta.num_ficha = change.num_ficha;
+                                if (change.regimen) meta.regimen = change.regimen;
+                                if (change.patologia_dm !== undefined) meta.patologia_dm = change.patologia_dm;
+                                if (change.observaciones) meta.observaciones_generales = change.observaciones;
+                                
+                                await supabaseClient.from('pacientes').update({
+                                    metadata: meta,
+                                    edad: change.edad || undefined
+                                }).eq('id', dbId);
+                            }
+                        } else if (change.type === 'replace') {
+                            // Move old patient to floating
+                            if (change.oldPatientId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(change.oldPatientId)) {
+                                await supabaseClient.from('pacientes').update({ cama: '' }).eq('id', change.oldPatientId);
+                            }
+                            // Insert new patient
+                            const formattedName = window.formatPatientNameFirst ? window.formatPatientNameFirst(change.name) : change.name;
+                            const dbPayload = {
+                                nombre: formattedName,
+                                edad: change.edad || 0,
+                                cama: change.bed,
+                                estado_sala: 'activo',
+                                user_id: currentUserId || null,
+                                metadata: {
+                                    num_ficha: change.num_ficha || '',
+                                    regimen: change.regimen || '',
+                                    patologia_dm: !!change.patologia_dm,
+                                    observaciones_generales: change.observaciones || '',
+                                    location: {
+                                        floor: activeLoc.floor,
+                                        serviceId: activeLoc.serviceId,
+                                        serviceName: activeLoc.serviceName
+                                    }
+                                }
+                            };
+                            const { data: inserted, error } = await supabaseClient.from('pacientes').insert([dbPayload]).select('id, created_at').single();
+                            if (!error && inserted) {
+                                try {
+                                    let curCache = JSON.parse(localStorage.getItem('local_ward_patients') || '[]');
+                                    const matchItem = curCache.find(p => p.cama === change.bed && p.nombre === formattedName);
+                                    if (matchItem) {
+                                        matchItem.id = inserted.id;
+                                        matchItem.created_at = inserted.created_at;
+                                        localStorage.setItem('local_ward_patients', JSON.stringify(curCache));
+                                    }
+                                } catch(e) {}
+                            }
                         }
+                    } catch(itemErr) {
+                        console.warn("Background sync error for item:", change, itemErr);
                     }
-                } catch(err) {
-                    console.error("Background sync error for bed:", change.bed, err);
-                }
+                });
+                await Promise.all(tasks);
+            } catch(syncErr) {
+                console.warn("Background batch sync warning:", syncErr);
             }
         })();
     }
@@ -10372,7 +10569,16 @@ window.renderWardBedsGrid = async function() {
             localCache.forEach(lp => {
                 if (!lp || lp.estado_sala === 'de_alta' || lp.estado_sala === 'eliminado') return;
                 
-                const idx = activePatients.findIndex(ap => (ap.id === lp.id) || (ap.cama && lp.cama && ap.cama.trim().toUpperCase() === lp.cama.trim().toUpperCase()));
+                const idx = activePatients.findIndex(ap => {
+                    if (ap.id === lp.id) return true;
+                    if (ap.cama && lp.cama && ap.cama.trim().toUpperCase() === lp.cama.trim().toUpperCase()) {
+                        const apSrv = ap.metadata?.location?.serviceId;
+                        const lpSrv = lp.metadata?.location?.serviceId;
+                        if (apSrv && lpSrv) return apSrv === lpSrv;
+                        return true;
+                    }
+                    return false;
+                });
                 if (idx >= 0) {
                     const realDbId = activePatients[idx].id;
                     activePatients[idx] = {
@@ -10393,13 +10599,13 @@ window.renderWardBedsGrid = async function() {
             console.error("Error merging local ward patients:", e);
         }
         
-        // Filter patients matched to this service
+        // Filter patients matched to this service (strict service isolation)
         const matchedPatients = activePatients.filter(p => {
             const cleanPBed = p.cama ? p.cama.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : '';
             const isBedInService = bedsList.some(b => b.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === cleanPBed || b === p.cama);
 
             if (p.metadata && p.metadata.location && p.metadata.location.serviceId) {
-                return p.metadata.location.serviceId === activeLoc.serviceId || isBedInService;
+                return p.metadata.location.serviceId === activeLoc.serviceId;
             }
             return isBedInService;
         });
