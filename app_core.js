@@ -7044,8 +7044,8 @@ o Interpretación: ${(nrs.classification || 'Sin riesgo nutricional').toUpperCas
         // Format selection
         const selFormatEl = document.getElementById('vgoFormatSelect');
         let selectedFormat = selFormatEl?.value || localStorage.getItem('selectedVGOFormat');
-        if (!selectedFormat) {
-            selectedFormat = (pMode === 'pediatric' || pMode === 'neonate') ? 'pediatric_neo' : 'adult_std';
+        if (!selectedFormat || selectedFormat === 'pediatric_neo') {
+            selectedFormat = pMode === 'neonate' ? 'neonate' : (pMode === 'pediatric' ? 'pediatric' : 'adult_std');
             if (selFormatEl) selFormatEl.value = selectedFormat;
         }
 
@@ -7217,12 +7217,13 @@ ${cargoFirma}
 Unidad de Nutrición y Alimentación
 Hospital Regional de Antofagasta`;
 
-        } else if (selectedFormat === 'pediatric_neo') {
-            // 3. VGO Pediátrica / Neonatal
-            vgoText = `VALORACIÓN GLOBAL OBJETIVA PEDIÁTRICA / NEONATAL
+        } else if (selectedFormat === 'pediatric') {
+            // 4. VGO Pediátrica
+            vgoText = `VALORACIÓN GLOBAL OBJETIVA PEDIÁTRICA
 
 o Fecha de evaluación: ${dateStr}
-o Nombre/Ficha: ${numFicha} | Edad: ${ageStr} | Sexo: ${sexStr}
+o Nombre/Ficha: ${p.nombre || 'Paciente'} | Ficha: ${numFicha}
+o Edad: ${ageStr} | Sexo: ${sexStr}
 o Diagnóstico Médico: ${dxMedico}
 
 ANTROPOMETRÍA Y CRECIMIENTO:
@@ -7251,8 +7252,141 @@ o Registro estricto de volúmenes administrados en hoja de enfermería / SEDILE.
 _________________
 ${userName}
 ${cargoFirma}
-Nutrición Pediátrica / Neonatal
+Nutrición Pediátrica
 Hospital Regional de Antofagasta`;
+
+        } else if (selectedFormat === 'neonate') {
+            // 5. EVALUACIÓN NUTRICIONAL (Neonatología)
+            const semNacer = parseInt(document.getElementById('egSemanas')?.value) || 0;
+            const diasNacer = parseInt(document.getElementById('egDias')?.value) || 0;
+
+            // FNC (Fecha de Nacimiento Corregida / 40 semanas)
+            let fncStr = "--";
+            let ecStr = "--";
+            let egcStr = "--";
+            if (fnVal) {
+                const [fy, fm, fd] = fnVal.split('-').map(Number);
+                const bDate = new Date(fy, fm - 1, fd);
+                const today = new Date();
+                const diffMs = today.getTime() - bDate.getTime();
+                const diffDays = Math.max(0, Math.floor(diffMs / (24 * 60 * 60 * 1000)));
+                ecStr = `${diffDays} días`;
+
+                if (semNacer > 0) {
+                    const termDays = ((40 - semNacer) * 7) - diasNacer;
+                    const fncDate = new Date(bDate.getTime() + (termDays * 24 * 60 * 60 * 1000));
+                    fncStr = fncDate.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+                    const totalDaysGestCorr = (semNacer * 7) + diasNacer + diffDays;
+                    const semGestCorr = Math.floor(totalDaysGestCorr / 7);
+                    const diasGestCorr = totalDaysGestCorr % 7;
+                    egcStr = `${semGestCorr} Sem${diasGestCorr > 0 ? ` + ${diasGestCorr} día${diasGestCorr !== 1 ? 's' : ''}` : ''}`;
+                }
+            }
+
+            // Anthropometrics
+            const wG = pesoFisico > 0 ? (pesoFisico < 10 ? Math.round(pesoFisico * 1000) : Math.round(pesoFisico)) : 0;
+            const pesoKgNeo = pesoFisico > 0 ? (pesoFisico < 10 ? pesoFisico : pesoFisico / 1000) : 0;
+            const tallaNeo = cm > 0 ? cm : (tallaMt !== '--' ? Math.round(parseFloat(tallaMt) * 100) : 0);
+            const pcNeo = parseFloat(document.getElementById('pcefalico')?.value) || 0;
+
+            const pnStr = p.pesoNacimiento || p.pn || (wG > 0 ? `${wG} gr` : '--');
+            const tnStr = p.tallaNacimiento || p.tn || (tallaNeo > 0 ? `${tallaNeo} cm` : '--');
+            const pcnStr = p.pcNacimiento || p.pcn || (pcNeo > 0 ? `${pcNeo} cm` : '--');
+
+            // Pittaluga indicators
+            let pittPesoStr = "< Percentil 3";
+            let pittTallaStr = "< Percentil 10";
+            let pittPcStr = "< Percentil 10";
+            if (semNacer >= 24 && semNacer <= 42 && window.PITTALUGA_DATA) {
+                const wRefs = window.PITTALUGA_DATA.peso ? window.PITTALUGA_DATA.peso[semNacer] : null;
+                if (wRefs && wG > 0) {
+                    if (wG < wRefs.p3) pittPesoStr = "< Percentil 3";
+                    else if (wG < wRefs.p10) pittPesoStr = "< Percentil 10";
+                    else if (wG <= wRefs.p90) pittPesoStr = "Percentil 10 - 90";
+                    else pittPesoStr = "> Percentil 90";
+                }
+                const tRefs = window.PITTALUGA_DATA.talla ? window.PITTALUGA_DATA.talla[semNacer] : null;
+                if (tRefs && tallaNeo > 0) {
+                    if (tallaNeo < tRefs.p10) pittTallaStr = "< Percentil 10";
+                    else if (tallaNeo <= tRefs.p90) pittTallaStr = "Percentil 10 - 90";
+                    else pittTallaStr = "> Percentil 90";
+                }
+                const pcRefs = window.PITTALUGA_DATA.pc ? window.PITTALUGA_DATA.pc[semNacer] : null;
+                if (pcRefs && pcNeo > 0) {
+                    if (pcNeo < pcRefs.p10) pittPcStr = "< Percentil 10";
+                    else if (pcNeo <= pcRefs.p90) pittPcStr = "Percentil 10 - 90";
+                    else pittPcStr = "> Percentil 90";
+                }
+            }
+
+            // Diagnóstico Nutricional
+            let diagNutriNeo = des && des !== 'Sin diagnóstico ingresado' ? des : '';
+            if (!diagNutriNeo) {
+                let premText = semNacer > 0 ? (semNacer < 28 ? `Prematuro extremo ${semNacer} SG` : (semNacer < 32 ? `Prematuro moderado ${semNacer} SG` : (semNacer < 37 ? `Prematuro tardío ${semNacer} SG` : 'Recién nacido de término'))) : 'Neonato';
+                let pesoText = wG > 0 ? (wG < 1000 ? 'con peso extremadamente bajo al nacer <1000 gr' : (wG < 1500 ? 'con muy bajo peso al nacer <1500 gr' : (wG < 2500 ? 'con bajo peso al nacer <2500 gr' : 'con peso adecuado'))) : '';
+                diagNutriNeo = `${premText}${pesoText ? `, ${pesoText}` : ''}. Hoy se encuentra con desnutrición según parámetro P/E y L/E.`;
+            }
+
+            // Micronutrientes (Calcio y Fósforo)
+            const caKg = 150;
+            const fKg = 100;
+            const caTot = pesoKgNeo > 0 ? Math.round(caKg * pesoKgNeo) : 120;
+            const fTot = pesoKgNeo > 0 ? Math.round(fKg * pesoKgNeo) : 87;
+
+            // Prescripción dietética
+            const volToma = parseFloat(document.getElementById('volumen')?.value) || 0;
+            const vecesToma = parseInt(document.getElementById('volumeTimes')?.value) || 8;
+            const hrsInterval = vecesToma > 0 ? Math.round(24 / vecesToma) : 3;
+            const totalVol = volToma > 0 ? (volToma * vecesToma) : (parseFloat(document.getElementById('volumeTotalDisplay')?.innerText) || 0);
+            const volKg = pesoKgNeo > 0 && totalVol > 0 ? Math.round(totalVol / pesoKgNeo) : 0;
+
+            let nomPrescrip = formula ? `${formula.name}${document.getElementById('dilution')?.value ? ` ${document.getElementById('dilution').value}%` : ''}` : 'LMF 4% exclusiva';
+            let prescripDietNeo = `${nomPrescrip}  ${volToma > 0 ? `${volToma} cc` : '17 cc'} cada ${hrsInterval} hrs por ${vecesToma} veces al día`;
+            let volTotalNeo = totalVol > 0 ? totalVol : 136;
+            let volTotalNeoKg = volKg > 0 ? volKg : 156;
+
+            const fnDisplay = semNacer > 0 ? `${fNacStr} (${semNacer} Sem${diasNacer > 0 ? ` + ${diasNacer} d` : ''})` : fNacStr;
+
+            vgoText = `EVALUACIÓN NUTRICIONAL
+
+Nombre: ${p.nombre || 'Sin nombre ingresado'}                               Ficha: ${numFicha}
+FN: ${fnDisplay}                                 FNC:  ${fncStr}  
+EC: ${ecStr}                     EGC: ${egcStr}                                                          
+                                                     
+Dg Médico: ${dxMedico}
+
+Anamnesis: ${anam.anamnesisGeneral || ''}
+
+Datos Antropométricos:
+Peso: ${wG > 0 ? `${wG} gr` : `${pesoFisico} kg`}                                PN: ${pnStr.includes('gr') ? pnStr : `${pnStr} gr`}
+Talla: ${tallaNeo > 0 ? `${tallaNeo} cm` : `${tallaMt} mt`}                                 TN: ${tnStr.includes('cm') ? tnStr : `${tnStr} cm`}
+Pc: ${pcNeo > 0 ? `${pcNeo} cm` : '--'}                                     PcN: ${pcnStr.includes('cm') ? pcnStr : `${pcnStr} cm`}
+ 
+Indicadores:
+Según curvas Alarcon-Pittaluga
+P/E:    ${pittPesoStr}
+L/E:    ${pittTallaStr}
+Pc/E:   ${pittPcStr}
+
+Diagnóstico Nutricional:
+${diagNutriNeo}
+
+Cálculo de Requerimientos: Según Fórmula Factorial
+Calorías:    ${Math.round(goal)} kcals      (${factorKcalVal} kcal/kg/día)              
+Proteínas:      ${pTotal.toFixed(1)} gr/día    (${factorProtVal} gr/kg/día)                   ${pPct}% VCT
+Cho:             ${cTotal.toFixed(1)} gr/día                                               ${cPct}% VCT
+Lípidos:          ${lTotal.toFixed(1)} gr/día                                               ${lPct}% VCT
+Calcio:        ${caTot} mg/día (${caKg} mg/kg/día)
+Fósforo:        ${fTot} mg/día (${fKg} mg/kg/día)
+
+Sugerencia Prescripción Dietética:  
+${prescripDietNeo}
+Volumen total: ${volTotalNeo} cc (${volTotalNeoKg} cc/kg/día)
+
+Observaciones:
+${customStructureText || ''}
+  - Nutricionista UPC Neonatal`;
 
         } else {
             // 4. Evolución Nutricional Rápida ('quick_evo')
