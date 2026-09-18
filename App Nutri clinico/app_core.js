@@ -6672,8 +6672,73 @@ function initGlobalEvents() {
 
         const cargoFirmaVI = window.getVGOServiceSignature ? window.getVGOServiceSignature() : "Nutricionista clínica";
 
+        const currentServiceVal = (
+            document.getElementById('vgoServiceSelect')?.value || 
+            localStorage.getItem('selectedVGOService') || 
+            AppState.currentService || 
+            p.servicio || 
+            ''
+        ).toLowerCase();
+
+        const isNeonateService = (
+            patientType === 'neonate' || 
+            mode === 'neonate' || 
+            p.type === 'neonate' || 
+            document.getElementById('ptNeonate')?.checked ||
+            currentServiceVal.includes('neonat')
+        );
+
         let viText = "";
-        if (patientType === 'adult') {
+        if (isNeonateService) {
+            let fNacStr = "";
+            const fnVal = document.getElementById('fechaNacimiento')?.value || p.fechaNacimiento;
+            if (fnVal) {
+                const parts = fnVal.split('-');
+                if (parts.length === 3) {
+                    fNacStr = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                }
+            }
+
+            const pesoNeoStr = p.peso_nacimiento || p.pn || (pesoFisico > 0 ? (pesoFisico < 10 ? `${Math.round(pesoFisico * 1000)} gr` : `${pesoFisico} gr`) : '');
+            const longNeoStr = cm > 0 ? `${cm} cm` : (p.estatura ? `${Math.round(p.estatura * 100)} cm` : '');
+            const pcNeoVal = parseFloat(document.getElementById('pcefalico')?.value) || p.pcefalico || 0;
+            const pcNeoStr = pcNeoVal > 0 ? `${pcNeoVal} cm` : '';
+            const dxMedStr = dxMedico && dxMedico !== 'Sin diagnóstico médico' ? dxMedico : '';
+            const nutriSign = (userName && userName !== '[Nombre del Profesional]') ? userName : 'Barbara Veliz Ramirez';
+
+            // Estructura personalizada adicional si existe
+            const selService = document.getElementById('vgoServiceSelect')?.value || 'neonatologia';
+            let customStructureVI = "";
+            const savedKey = `vgoCustomStructure_${selService}`;
+            const savedDataStr = localStorage.getItem(savedKey);
+            if (savedDataStr) {
+                try {
+                    const savedData = JSON.parse(savedDataStr);
+                    if (savedData.body && savedData.body.trim()) {
+                        const headerTitle = savedData.title && savedData.title.trim() ? savedData.title.trim() : 'Campos Adicionales del Servicio';
+                        customStructureVI = `\n${headerTitle}:\n${savedData.body.trim()}\n`;
+                    }
+                } catch (e) {}
+            }
+
+            viText = `INGRESO NUTRICIONAL
+
+Nombre: ${pName}    Fecha de nacimiento: ${fNacStr}
+
+Diagnóstico médico de ingreso:
+${dxMedStr}
+
+Datos Antropométricos: (De nacimiento, obtenidos de informe del RN)
+Peso: ${pesoNeoStr}          
+Longitud: ${longNeoStr}
+P. Cefálico: ${pcNeoStr}
+
+Observaciones:
+${customStructureVI}
+
+${nutriSign}  - Nutricionista UPC Neonatal`;
+
+        } else if (patientType === 'adult') {
             const isElderly = pAgeVal >= 65;
             let clasifIMC = "Normopeso";
             if (isElderly) {
