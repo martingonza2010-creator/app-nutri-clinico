@@ -7089,6 +7089,75 @@ ${cargoFirma}
 Unidad de Nutrición
 Hospital Regional de Antofagasta`;
 
+        } else if (selectedFormat === 'eval_nutri') {
+            // EVALUACIÓN POR NUTRICIONISTA (VALORACION GLOBAL OBJETIVA)
+            const alergiasNutri = alergiasVal === 'Sí' ? (anam.alergiasDetalle || 'Presenta alergias') : '-';
+            const deglucionNutri = deglucionVal === 'Sí' ? '(+) Presenta trastorno' : '(-)';
+            const viaAlim = formula ? 'Enteral' : 'oral';
+            const transitoNutri = (deposicionesVal === 'Sí' || deposicionesVal === 'Normal') ? '(+) Conservado' : (deposicionesVal === 'No' ? 'Sin deposiciones' : '(+)');
+            const tallaCmVal = cm > 0 ? cm : (tallaMt !== '--' ? Math.round(parseFloat(tallaMt) * 100) : '--');
+            const cBraqStr = cBraquialVal && cBraquialVal !== '[Completar]' ? `${cBraquialVal} cm` : 'No evaluado';
+
+            let tamizajeBlock = "";
+            if (pMode === 'pediatric' || pMode === 'neonate') {
+                tamizajeBlock = `Tamizaje Nutricional STRONGkids:
+-	Puntaje: ${sk.score || 0} puntos.
+-	Interpretación: ${(sk.classification || 'Riesgo bajo')}`;
+            } else {
+                tamizajeBlock = `Tamizaje Nutricional NRS 2002:
+-	Puntaje: ${nrs.score || 0} puntos.
+-	Interpretación: ${(nrs.classification || 'Sin riesgo nutricional')}`;
+            }
+
+            vgoText = `EVALUACIÓN POR NUTRICIONISTA
+(VALORACION GLOBAL OBJETIVA)
+
+Fecha de evaluación: ${dateStr}
+Edad: ${ageStr}
+
+Anamnesis alimentaria nutricional: 
+Alergias alimentaria: ${alergiasNutri}
+Selectividad alimentaria (-)
+Vía de alimentación: ${viaAlim}
+Trastorno de deglución: ${deglucionNutri}  
+Tránsito intestinal: ${transitoNutri} 
+
+${tamizajeBlock}
+
+Riesgo de LPP según Escala de Braden 
+·	${riesgoLpp}
+
+Datos antropométricos: 
+-	Peso: ${pesoFisico} Kg  
+-	Talla: ${tallaCmVal} cm.
+C. Braquial: ${cBraqStr}
+
+Exámenes de relevancia nutricional:
+${evoExamenes}
+
+Diagnóstico nutricional integrado:
+${diagNutri}
+
+Requerimientos nutricionales 
+-	Calorías: ${Math.round(goal)} kcal 🡪 (${factorKcalVal} kcal x kg de peso) 
+-	Proteínas: ${pTotal.toFixed(1)} g 🡪 ${pPct}% VCT
+-	CHO: ${cTotal.toFixed(1)} g 🡪 ${cPct}% VCT
+-	Lípidos: ${lTotal.toFixed(1)} g 🡪 ${lPct}% VCT
+
+Prescripción dietética: 
+${dietoterapiaStr}
+${customStructureText}
+Plan/observaciones:
+Paciente con buena tolerancia e ingesta.
+Se está cubriendo requerimientos al 100%. 
+Seguimiento nutricional diario.  
+
+_________________
+${userName}
+${cargoFirma}
+Unidad de Alimentación y Nutrición
+SEDILE-CEFE`;
+
         } else if (selectedFormat === 'detailed_anam') {
             // 2. VGO Detallada (Anamnesis completa + %VCT + PES)
             vgoText = `VALORACION GLOBAL OBJETIVA POR NUTRICIONISTA
