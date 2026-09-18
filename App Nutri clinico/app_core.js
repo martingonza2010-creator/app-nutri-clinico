@@ -7014,35 +7014,45 @@ o Puntaje: ${nrs.score || 0} pts
 o Interpretación: ${(nrs.classification || 'Sin riesgo nutricional').toUpperCase()}`;
         }
 
+        const isEstimated = (document.getElementById('altrodilla')?.value || document.getElementById('mediaenv')?.value || document.getElementById('pesoCalculoSelect')?.value !== 'real');
+        const dataAntropoStr = isEstimated ? '(estimado)' : '(Bipedestado)';
+        
+        // Risk of LPP
+        const riesgoLpp = document.getElementById('riesgo_lpp')?.value || 'Sin evaluar';
+        
+        // Biochem parameters
+        const evoExamenes = document.getElementById('evoExamenes')?.value || 'Sin reportar';
+
+        // Diagnostic
+        let diagNutri = `Paciente ${pMode === 'pediatric' ? 'pediátrico' : (pMode === 'neonate' ? 'neonato' : 'adulto')} ${sexStr.toLowerCase()} con estado nutricional ${clasifIMC.toLowerCase()} según IMC.`;
+        const compBraquialText = p.amaStatus || p.cbStatus ? ` Con compartimiento braquial ${p.amaStatus || p.cbStatus}.` : '';
+        if (compBraquialText) diagNutri += compBraquialText;
+        if (des && des !== 'Sin diagnóstico ingresado') {
+            diagNutri = des;
+        }
+
+        // Factors calculation for Requirements
+        const factorKcalVal = parseFloat(document.getElementById('factorKcal')?.value) || (pesoCalc > 0 ? (goal / pesoCalc).toFixed(0) : 0);
+        const factorProtVal = parseFloat(document.getElementById('goalProtKg')?.value) || (pesoCalc > 0 ? (pTotal / pesoCalc).toFixed(1) : 0);
+
+        // Aporte
+        const curKcal = document.getElementById('valKcal')?.innerText || '0';
+        const curProt = document.getElementById('valProt')?.innerText || '0';
+        const curCho = document.getElementById('valCHO')?.innerText || '0';
+        const curLip = document.getElementById('valLip')?.innerText || '0';
+
+        // Format selection
+        const selFormatEl = document.getElementById('vgoFormatSelect');
+        let selectedFormat = selFormatEl?.value || localStorage.getItem('selectedVGOFormat');
+        if (!selectedFormat) {
+            selectedFormat = (pMode === 'pediatric' || pMode === 'neonate') ? 'pediatric_neo' : 'adult_std';
+            if (selFormatEl) selFormatEl.value = selectedFormat;
+        }
+
         let vgoText = "";
-        if (pMode === 'adult') {
-            const isEstimated = (document.getElementById('altrodilla')?.value || document.getElementById('mediaenv')?.value || document.getElementById('pesoCalculoSelect')?.value !== 'real');
-            const dataAntropoStr = isEstimated ? '(estimado)' : '(Bipedestado)';
-            
-            // Risk of LPP
-            const riesgoLpp = document.getElementById('riesgo_lpp')?.value || 'Sin evaluar';
-            
-            // Biochem parameters
-            const evoExamenes = document.getElementById('evoExamenes')?.value || 'Sin reportar';
 
-            // Diagnostic
-            let diagNutri = `Paciente adulto ${sexStr.toLowerCase()} con estado nutricional ${clasifIMC.toLowerCase()} según IMC.`;
-            const compBraquialText = p.amaStatus || p.cbStatus ? ` Con compartimiento braquial ${p.amaStatus || p.cbStatus}.` : '';
-            if (compBraquialText) diagNutri += compBraquialText;
-            if (des && des !== 'Sin diagnóstico ingresado') {
-                diagNutri = des;
-            }
-
-            // Factors calculation for Requirements
-            const factorKcalVal = parseFloat(document.getElementById('factorKcal')?.value) || (pesoCalc > 0 ? (goal / pesoCalc).toFixed(0) : 0);
-            const factorProtVal = parseFloat(document.getElementById('goalProtKg')?.value) || (pesoCalc > 0 ? (pTotal / pesoCalc).toFixed(1) : 0);
-
-            // Aporte
-            const curKcal = document.getElementById('valKcal')?.innerText || '0';
-            const curProt = document.getElementById('valProt')?.innerText || '0';
-            const curCho = document.getElementById('valCHO')?.innerText || '0';
-            const curLip = document.getElementById('valLip')?.innerText || '0';
-
+        if (selectedFormat === 'adult_std') {
+            // 1. VGO Adulto Estándar HRA (Hospitalario compacto)
             vgoText = `Valoracion global objetiva
 ANTROPOMETRÍA
 Datos Antropométricos:  ${dataAntropoStr}
@@ -7066,19 +7076,21 @@ Aporte: ${curKcal} kcals, ${curProt} gr prot, ${curCho} gr cho, ${curLip} gr lip
 
 DIETOTERAPIA: 
 ${dietoterapiaStr}
-
+${customStructureText}
 Observaciones/Plan:
-${customStructureText || `o Paciente tolerando nutrición
+o Paciente tolerando nutrición
 o Producto cubre requerimientos nutricionales calóricos proteicos
 o Seguimiento a deposiciones, tolerancia 
-o Seguimiento nutricional continuo`}
+o Seguimiento nutricional continuo
 
 _________________
 ${userName} 
 ${cargoFirma} 
 Unidad de Nutrición
 Hospital Regional de Antofagasta`;
-        } else {
+
+        } else if (selectedFormat === 'detailed_anam') {
+            // 2. VGO Detallada (Anamnesis completa + %VCT + PES)
             vgoText = `VALORACION GLOBAL OBJETIVA POR NUTRICIONISTA
 
 o Fecha de evaluación: ${dateStr}
@@ -7092,9 +7104,10 @@ Diagnóstico:
 o 1. ${dxMedico}
 o Antecedentes Mórbidos: ${antecedentesMorbidos}
 
-Antropometría: (Evaluación en bipedestación por nutricionista del servicio)
+Antropometría: (Evaluación ${dataAntropoStr.toLowerCase()} por nutricionista del servicio)
 o Peso actual: ${pesoFisico} kg
 o Talla: ${tallaMt} mt
+o IMC: ${imcNum > 0 ? imcNum.toFixed(1) : imcVal} kg/m² (${clasifIMC})
 o C. braquial: ${cBraquialVal} cm
 o C. cintura: ${cCintura} cm
 
@@ -7105,26 +7118,96 @@ o Síntomas gastrointestinales: Nauseas (${nauseasVal}) Vómitos (${vomitosVal})
 o Anamnesis alimentaria: Dentadura (${dentaduraVal}) Alergias/intolerancias alimentarias (${alergiasVal}) Trastorno de deglución (${deglucionVal}) Apetito (${apetitoVal}).
 
 ${tamizajeText}
+o Valoración riesgo LPP: ${riesgoLpp.toUpperCase()}
+
+Exámenes de relevancia:
+${evoExamenes}
 
 Diagnóstico Nutricional Integrado:
-o ${des}
+o ${diagNutri}
 
 Requerimientos nutricionales:
-o Calorías: ${Math.round(goal)} kcal
-o Proteínas: ${pTotal.toFixed(1)} gr -> VCT ${pPct} %
+o Calorías: ${Math.round(goal)} kcal (${factorKcalVal} kcal/kg)
+o Proteínas: ${pTotal.toFixed(1)} gr -> VCT ${pPct} % (${factorProtVal} g/kg)
 o Carbohidratos: ${cTotal.toFixed(1)} gr -> VCT ${cPct} %
 o Lípidos: ${lTotal.toFixed(1)} gr -> VCT ${lPct} %
+
+Aporte actual: ${curKcal} kcal | P: ${curProt} g | CHO: ${curCho} g | LIP: ${curLip} g
 
 Dietoterapia actual:
 o ${dietoterapiaStr}
 ${customStructureText}
 Observaciones/Plan/Sugerencias:
-o [Completar]
+o Monitorización diaria de ingesta y tolerancia enteral/oral
+o Balance hídrico y vigilar tránsito intestinal
+o Ajuste según evolución clínica y metabólica
 
+_________________
 ${userName}
 ${cargoFirma}
-Unidad de nutrición y alimentación
+Unidad de Nutrición y Alimentación
 Hospital Regional de Antofagasta`;
+
+        } else if (selectedFormat === 'pediatric_neo') {
+            // 3. VGO Pediátrica / Neonatal
+            vgoText = `VALORACIÓN GLOBAL OBJETIVA PEDIÁTRICA / NEONATAL
+
+o Fecha de evaluación: ${dateStr}
+o Nombre/Ficha: ${numFicha} | Edad: ${ageStr} | Sexo: ${sexStr}
+o Diagnóstico Médico: ${dxMedico}
+
+ANTROPOMETRÍA Y CRECIMIENTO:
+o Peso actual: ${pesoFisico} kg | Talla: ${tallaMt} mt
+${indicadoresText}
+
+${tamizajeText}
+
+TOLERANCIA Y SÍNTOMAS:
+o Síntomas digestivos: Vómitos (${vomitosVal}), Regurgitaciones (${reflujoVal}), Deposiciones (${deposicionesVal}), Distensión (${distensionVal}).
+o Vía de alimentación: ${dietoterapiaStr}
+
+DIAGNÓSTICO NUTRICIONAL:
+o ${diagNutri}
+
+METAS Y APORTE NUTRICIONAL:
+o Requerimiento Calórico: ${Math.round(goal)} kcal (${factorKcalVal} kcal/kg/día)
+o Requerimiento Proteico: ${pTotal.toFixed(1)} g (${factorProtVal} g/kg/día)
+o Aporte entregado: ${curKcal} kcal | Prot: ${curProt} g | CHO: ${curCho} g | Lípidos: ${curLip} g
+${customStructureText}
+PLAN Y RECOMENDACIONES:
+o Mantener esquema de alimentación según indicación médica/nutricional.
+o Control diario de tolerancia digestiva y curva ponderal.
+o Registro estricto de volúmenes administrados en hoja de enfermería / SEDILE.
+
+_________________
+${userName}
+${cargoFirma}
+Nutrición Pediátrica / Neonatal
+Hospital Regional de Antofagasta`;
+
+        } else {
+            // 4. Evolución Nutricional Rápida ('quick_evo')
+            vgoText = `EVOLUCIÓN NUTRICIONAL
+
+Fecha: ${dateStr} | Ficha: ${numFicha} | Paciente: ${p.nombre || 'Adulto'} (${sexStr}, ${ageStr})
+Diagnóstico Nutricional: ${diagNutri}
+
+ANTROPOMETRÍA:
+o Peso: ${pesoFisico} kg | Talla: ${tallaMt} mt | IMC: ${imcNum > 0 ? imcNum.toFixed(1) : imcVal} kg/m² (${clasifIMC})
+o Tamizaje Nutricional: ${nrs.score || 0} pts (${nrs.score >= 3 ? 'En Riesgo' : 'Sin Riesgo'})
+
+METAS Y RÉGIMEN ACTUAL:
+o Requerimientos: ${Math.round(goal)} kcal (${factorKcalVal} kcal/kg) | Prot: ${pTotal.toFixed(1)} g (${factorProtVal} g/kg)
+o Régimen/Fórmula: ${dietoterapiaStr}
+o Aporte: ${curKcal} kcal | P: ${curProt} g | CHO: ${curCho} g | L: ${curLip} g
+${customStructureText}
+PLAN:
+o Tolerando indicación nutricional actual.
+o Continuar según evolución clínica y monitoreo de ingesta.
+
+_________________
+${userName}
+${cargoFirma} - Unidad de Nutrición HRA`;
         }
 
         content.innerText = vgoText;
@@ -7139,6 +7222,27 @@ Hospital Regional de Antofagasta`;
 
     const btnVGO = document.getElementById('btnGenerateVGO');
     if (btnVGO) btnVGO.onclick = window.generateVGO;
+
+// --- VGO FORMAT PREFERENCE HANDLERS ---
+window.updateVGOFormatPreference = function () {
+    const sel = document.getElementById('vgoFormatSelect');
+    if (!sel) return;
+    localStorage.setItem('selectedVGOFormat', sel.value);
+};
+
+window.initVGOFormatPreference = function () {
+    const sel = document.getElementById('vgoFormatSelect');
+    if (!sel) return;
+    const saved = localStorage.getItem('selectedVGOFormat');
+    if (saved && sel.querySelector(`option[value="${saved}"]`)) {
+        sel.value = saved;
+    }
+};
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', window.initVGOFormatPreference);
+} else {
+    window.initVGOFormatPreference();
+}
 
 // --- VGO SERVICE & CUSTOM STRUCTURE HANDLERS ---
 window.updateVGOServiceConfig = function () {

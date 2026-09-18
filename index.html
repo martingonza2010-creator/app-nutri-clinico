@@ -2170,15 +2170,25 @@
                     </div>
                 </div>
 
-                <div style="display:flex; gap:10px; margin-bottom:15px;">
+                <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:15px;">
                     <button id="btnGenerateNote" onclick="window.generateValoracionIngreso()"
-                        style="flex:1; background: #2c3e50; color:white; border:none; padding:10px 15px; border-radius:6px; font-weight:600; cursor:pointer; font-size:0.9rem;">
+                        style="flex:1; min-width:180px; background: #2c3e50; color:white; border:none; padding:10px 15px; border-radius:6px; font-weight:600; cursor:pointer; font-size:0.9rem;">
                         📝 Valoración de ingreso (VI)
                     </button>
-                    <button id="btnGenerateVGO" onclick="window.generateVGO()"
-                        style="flex:1; background: #27ae60; color:white; border:none; padding:10px 15px; border-radius:6px; font-weight:600; cursor:pointer; font-size:0.9rem;">
-                        📋 Generar VGO
-                    </button>
+                    <div style="flex:1.6; min-width:280px; display:flex; gap:6px; align-items:center;">
+                        <select id="vgoFormatSelect" onchange="window.updateVGOFormatPreference()"
+                            style="flex:1; padding:9px 10px; border:1px solid #10b981; border-radius:6px; font-size:0.8rem; font-weight:700; color:#065f46; background:#ecfdf5; outline:none; cursor:pointer;"
+                            title="Selecciona el formato de VGO que deseas generar">
+                            <option value="adult_std">🏥 VGO Adulto Estándar HRA</option>
+                            <option value="detailed_anam">📋 VGO Detallada (Anamnesis + %VCT)</option>
+                            <option value="pediatric_neo">👶 VGO Pediátrica / Neonatología</option>
+                            <option value="quick_evo">⚡ Evolución Nutricional Rápida</option>
+                        </select>
+                        <button id="btnGenerateVGO" onclick="window.generateVGO()"
+                            style="background: #27ae60; color:white; border:none; padding:10px 16px; border-radius:6px; font-weight:700; cursor:pointer; font-size:0.9rem; white-space:nowrap; display:flex; align-items:center; gap:5px;">
+                            📋 Generar VGO
+                        </button>
+                    </div>
                 </div>
                 <div id="clinicalNoteContainer" class="card"
                     style="display:none; padding:15px; border: 1px solid #bdc3c7; background: #fafbfc;">
