@@ -6943,6 +6943,8 @@ Hospital Regional de Antofagasta`;
 
         let indicadoresText = "";
         let tamizajeText = "";
+        let clasifIMC = "Normal / Eutrófico";
+        let imcNum = parseFloat(imcVal) || (pesoFisico > 0 && cm > 0 ? (pesoFisico / Math.pow(cm / 100, 2)) : 0);
 
         if (pMode === 'pediatric') {
             const zImcVal = document.getElementById('valZBMI')?.innerText || '--';
@@ -6978,9 +6980,8 @@ o Interpretación: Evaluación según Edad Gestacional y Curvas de Crecimiento I
         } else {
             // Adult or Adulto Mayor
             const isElderly = ageValYears >= 65;
-            const imcNum = parseFloat(imcVal) || (pesoFisico > 0 && cm > 0 ? (pesoFisico / Math.pow(cm / 100, 2)) : 0);
             
-            let clasifIMC = "Normal / Eutrófico";
+            clasifIMC = "Normal / Eutrófico";
             if (isElderly) {
                 // MINSAL Adulto Mayor Criteria (<23 Enflaquecido, 23-27.9 Normal, 28-31.9 Sobrepeso, >=32 Obeso)
                 if (imcNum > 0) {
