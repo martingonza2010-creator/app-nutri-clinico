@@ -6846,6 +6846,25 @@ Hospital Regional de Antofagasta`;
         if (titleH4) titleH4.innerText = "Vista Previa de Valoración de Ingreso (VI)";
         container.style.display = 'block';
         container.scrollIntoView({ behavior: 'smooth' });
+
+        // Auto-mark patient as having VI completed
+        if (AppState.patient) {
+            AppState.patient.metadata = AppState.patient.metadata || {};
+            AppState.patient.metadata.has_vi = true;
+            AppState.patient.metadata.fecha_vi = new Date().toISOString();
+            AppState.patient.metadata.fecha_evaluacion = new Date().toISOString();
+            AppState.patient.evaluado = true;
+            if (typeof window.savePatientToLocalStorage === 'function') {
+                window.savePatientToLocalStorage(AppState.patient);
+            }
+            if (typeof supabaseClient !== 'undefined' && supabaseClient && AppState.patient.id && !String(AppState.patient.id).startsWith('pat_')) {
+                supabaseClient.from('pacientes').update({
+                    evaluado: true,
+                    metadata: AppState.patient.metadata,
+                    updated_at: new Date()
+                }).eq('id', AppState.patient.id).then(() => {});
+            }
+        }
     };
 
     const btnNote = document.getElementById('btnGenerateNote');
@@ -7486,6 +7505,25 @@ ${cargoFirma} - Unidad de Nutrición HRA`;
         if (titleH4) titleH4.innerText = "Vista Previa de Evolución (VGO)";
         container.style.display = 'block';
         container.scrollIntoView({ behavior: 'smooth' });
+
+        // Auto-mark patient as having VGO completed (and reset 7-day timer)
+        if (AppState.patient) {
+            AppState.patient.metadata = AppState.patient.metadata || {};
+            AppState.patient.metadata.has_vgo = true;
+            AppState.patient.metadata.fecha_vgo = new Date().toISOString();
+            AppState.patient.metadata.fecha_evaluacion = new Date().toISOString();
+            AppState.patient.evaluado = true;
+            if (typeof window.savePatientToLocalStorage === 'function') {
+                window.savePatientToLocalStorage(AppState.patient);
+            }
+            if (typeof supabaseClient !== 'undefined' && supabaseClient && AppState.patient.id && !String(AppState.patient.id).startsWith('pat_')) {
+                supabaseClient.from('pacientes').update({
+                    evaluado: true,
+                    metadata: AppState.patient.metadata,
+                    updated_at: new Date()
+                }).eq('id', AppState.patient.id).then(() => {});
+            }
+        }
     };
 
     const btnVGO = document.getElementById('btnGenerateVGO');
@@ -10881,6 +10919,100 @@ window.applyColumnVisibilityStyles = function() {
     styleTag.textContent = css;
 };
 
+// --- TOGGLE EVAL STATUS (VI / VGO) MANUAL & AUTOMATIC HANDLER ---
+window.togglePatientEvalStatus = async function(patientId, evalType, event) {
+    if (event) event.stopPropagation();
+
+    let localCache = [];
+    try {
+        localCache = JSON.parse(localStorage.getItem('local_ward_patients') || '[]');
+    } catch (e) {
+        localCache = [];
+    }
+
+    let p = localCache.find(x => String(x.id) === String(patientId));
+
+    if (!p && typeof supabaseClient !== 'undefined' && supabaseClient) {
+        try {
+            const { data: dbP } = await supabaseClient.from('pacientes').select('*').eq('id', patientId).maybeSingle();
+            if (dbP) p = dbP;
+        } catch(e) {}
+    }
+
+    if (!p && AppState.patient && String(AppState.patient.id) === String(patientId)) {
+        p = AppState.patient;
+    }
+
+    if (!p) {
+        alert("No se pudo localizar el paciente seleccionado.");
+        return;
+    }
+
+    p.metadata = p.metadata || {};
+    const nowIso = new Date().toISOString();
+
+    if (evalType === 'vi') {
+        const currentVal = Boolean(p.metadata.has_vi);
+        p.metadata.has_vi = !currentVal;
+        if (!currentVal) {
+            p.metadata.fecha_vi = nowIso;
+            p.metadata.fecha_evaluacion = nowIso;
+            p.evaluado = true;
+        } else {
+            delete p.metadata.fecha_vi;
+            if (!p.metadata.has_vgo) {
+                p.evaluado = false;
+            }
+        }
+    } else if (evalType === 'vgo') {
+        const currentVal = Boolean(p.metadata.has_vgo);
+        p.metadata.has_vgo = !currentVal;
+        if (!currentVal) {
+            p.metadata.has_vgo = true;
+            p.metadata.fecha_vgo = nowIso;
+            p.metadata.fecha_evaluacion = nowIso;
+            p.evaluado = true;
+        } else {
+            delete p.metadata.fecha_vgo;
+            if (!p.metadata.has_vi) {
+                p.evaluado = false;
+            }
+        }
+    }
+
+    // Update local cache
+    const cacheIdx = localCache.findIndex(x => String(x.id) === String(patientId));
+    if (cacheIdx >= 0) {
+        localCache[cacheIdx] = { ...localCache[cacheIdx], ...p, metadata: p.metadata, evaluado: p.evaluado };
+    } else {
+        localCache.push(p);
+    }
+    localStorage.setItem('local_ward_patients', JSON.stringify(localCache));
+
+    if (AppState.patient && String(AppState.patient.id) === String(patientId)) {
+        AppState.patient.metadata = p.metadata;
+        AppState.patient.evaluado = p.evaluado;
+    }
+
+    // Sync to Supabase in background
+    if (typeof supabaseClient !== 'undefined' && supabaseClient && !String(patientId).startsWith('pat_')) {
+        try {
+            await supabaseClient.from('pacientes').update({
+                evaluado: p.evaluado,
+                metadata: p.metadata,
+                updated_at: new Date()
+            }).eq('id', patientId);
+        } catch(e) {
+            console.warn("Error updating eval status in Supabase:", e);
+        }
+    }
+
+    // Re-render ward grid immediately
+    if (typeof window.renderWardBedsGrid === 'function') {
+        window.renderWardBedsGrid();
+    }
+};
+
 window.renderWardBedsGrid = async function() {
     const activeLocStr = localStorage.getItem('activeLocation');
     if (!activeLocStr) return;
@@ -10983,6 +11115,89 @@ window.renderWardBedsGrid = async function() {
             return isBedInService;
         });
         
+        // 2b. Compute clinical evaluation statuses (VI, VGO, 7-day reevaluation check)
+        const evalFilterSelect = document.getElementById('wardEvalFilterSelect');
+        const evalFilter = evalFilterSelect ? evalFilterSelect.value : 'all';
+        let reevalCount = 0;
+        const now = new Date();
+
+        matchedPatients.forEach(p => {
+            const hasVI = !!(p.has_vi || p.metadata?.has_vi);
+            const hasVGO = !!(p.has_vgo || p.metadata?.has_vgo);
+
+            // Determine latest evaluation date
+            const lastEvalDateStr = p.fecha_vgo || p.metadata?.fecha_vgo || p.fecha_vi || p.metadata?.fecha_vi || p.metadata?.fecha_evaluacion || p.created_at;
+            let daysElapsed = 0;
+            if (lastEvalDateStr) {
+                const evalD = new Date(lastEvalDateStr);
+                if (!isNaN(evalD.getTime())) {
+                    const diffTime = Math.max(0, now.getTime() - evalD.getTime());
+                    daysElapsed = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+                }
+            }
+
+            const needsReeval = daysElapsed >= 7;
+            if (needsReeval) {
+                reevalCount++;
+            }
+
+            p._hasVI = hasVI;
+            p._hasVGO = hasVGO;
+            p._daysElapsed = daysElapsed;
+            p._needsReeval = needsReeval;
+
+            let matches = true;
+            if (evalFilter === 'reeval') {
+                matches = needsReeval;
+            } else if (evalFilter === 'none') {
+                matches = !hasVI && !hasVGO;
+            } else if (evalFilter === 'vi_only') {
+                matches = hasVI && !hasVGO;
+            } else if (evalFilter === 'vi_and_vgo') {
+                matches = hasVI && hasVGO;
+            }
+            p._matchesEvalFilter = matches;
+        });
+
+        // Update reevaluation counter badge in header
+        const reevalBadge = document.getElementById('wardReevalCountBadge');
+        if (reevalBadge) {
+            if (reevalCount > 0) {
+                reevalBadge.style.display = 'inline-block';
+                reevalBadge.textContent = `⚠️ ${reevalCount} por reevaluar`;
+            } else {
+                reevalBadge.style.display = 'none';
+            }
+        }
+
+        // Helper function to render interactive evaluation pills [VI] [VGO] and Reeval badge
+        const getEvalPillsHTML = (p, isCompact = false) => {
+            if (!p) return '';
+            const viActive = !!p._hasVI;
+            const vgoActive = !!p._hasVGO;
+            const needsReeval = !!p._needsReeval;
+            const days = p._daysElapsed || 0;
+
+            const viStyle = viActive 
+                ? 'background:#10b981; color:white; border:1px solid #059669;' 
+                : 'background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1;';
+            const vgoStyle = vgoActive 
+                ? 'background:#3b82f6; color:white; border:1px solid #2563eb;' 
+                : 'background:#f1f5f9; color:#64748b; border:1px solid #cbd5e1;';
+
+            const reevalHTML = needsReeval 
+                ? `<span class="badge-reeval" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-size:${isCompact ? '0.62rem' : '0.68rem'}; font-weight:800; padding:1px 5px; border-radius:4px; white-space:nowrap; display:inline-block;" title="Han transcurrido ${days} días desde su última evaluación. ¡Requiere reevaluación!">⚠️ ${days}d</span>` 
+                : '';
+
+            return `
+                <div style="display:flex; align-items:center; justify-content:${isCompact ? 'center' : 'flex-end'}; gap:4px; flex-wrap:wrap;">
+                    <button onclick="event.stopPropagation(); window.togglePatientEvalStatus('${p.id}', 'vi', event);" style="${viStyle} padding:1px 5px; border-radius:4px; font-size:${isCompact ? '0.65rem' : '0.7rem'}; font-weight:800; cursor:pointer; transition:all 0.15s;" title="Valoración de Ingreso (VI) - Clic para alternar">${viActive ? '✓ VI' : '○ VI'}</button>
+                    <button onclick="event.stopPropagation(); window.togglePatientEvalStatus('${p.id}', 'vgo', event);" style="${vgoStyle} padding:1px 5px; border-radius:4px; font-size:${isCompact ? '0.65rem' : '0.7rem'}; font-weight:800; cursor:pointer; transition:all 0.15s;" title="Valoración Global Objetiva (VGO) - Clic para alternar">${vgoActive ? '✓ VGO' : '○ VGO'}</button>
+                    ${reevalHTML}
+                </div>
+            `;
+        };
+        
         // 3. Group beds by room
         const groupOrder = [];
         const groupedBeds = {};
@@ -11081,7 +11296,7 @@ window.renderWardBedsGrid = async function() {
                                 <th class="col-imc" style="color: #1e293b; font-weight: 800; width: 75px; text-align: center; padding: 0;"><div class="resizable-th" style="width: 75px;">EST NUT</div></th>
                                 <th class="col-nrs" style="color: #1e293b; font-weight: 800; width: 50px; text-align: center; padding: 0;"><div class="resizable-th" style="width: 50px;">SCRG</div></th>
                                 <th class="col-lpp" style="color: #1e293b; font-weight: 800; width: 80px; text-align: center; padding: 0;"><div class="resizable-th" style="width: 80px;">RIESGO LPP</div></th>
-                                <th class="col-eval" style="color: #1e293b; font-weight: 800; width: 65px; text-align: center; padding: 0;"><div class="resizable-th" style="width: 65px;">EVAL</div></th>
+                                <th class="col-eval" style="color: #1e293b; font-weight: 800; width: 130px; text-align: center; padding: 0;"><div class="resizable-th" style="width: 130px;">VI / VGO</div></th>
                                 <th class="col-edad" style="color: #1e293b; font-weight: 800; width: 45px; text-align: center; padding: 0;"><div class="resizable-th" style="width: 45px;">SEXO</div></th>
                                 <th class="col-eval" style="color: #1e293b; font-weight: 800; width: 95px; text-align: center; padding: 0;"><div class="resizable-th" style="width: 95px;">FECHA INGR</div></th>
                                 <th style="color: #1e293b; font-weight: 800; width: 110px; text-align: center; padding: 0;"><div class="resizable-th" style="width: 110px;">ACCIONES</div></th>
@@ -11092,6 +11307,12 @@ window.renderWardBedsGrid = async function() {
 
             groupOrder.forEach((roomName, roomIndex) => {
                 const bedsInRoom = groupedBeds[roomName];
+                const matchingInRoom = bedsInRoom.filter(b => {
+                    const p = matchedPatients.find(pat => pat.cama === b);
+                    return p && (evalFilter === 'all' || p._matchesEvalFilter);
+                }).length;
+                if (evalFilter !== 'all' && matchingInRoom === 0) return;
+
                 const occupiedInRoom = bedsInRoom.filter(b => matchedPatients.some(p => p.cama === b)).length;
                 
                 tableHTML += `
@@ -11105,6 +11326,10 @@ window.renderWardBedsGrid = async function() {
                 bedsInRoom.forEach(bedName => {
                     const patient = matchedPatients.find(p => p.cama === bedName);
                     
+                    if (evalFilter !== 'all' && (!patient || !patient._matchesEvalFilter)) {
+                        return;
+                    }
+
                     if (patient) {
                         const isCritico = patient.estado_sala === 'critico' || patient.requiere_atencion;
                         const rowStyle = isCritico ? 'background: #fff5f5; border-bottom: 1px solid #fecaca;' : 'border-bottom: 1px solid #e2e8f0;';
@@ -11250,7 +11475,7 @@ window.renderWardBedsGrid = async function() {
                                         <option value="Alto" ${patient.metadata?.riesgo_lpp === 'Alto' ? 'selected' : ''}>Alto</option>
                                     </select>
                                 </td>
-                                <td class="col-eval" style="padding: 6px 10px; text-align: center; font-weight:600;">${evalType}</td>
+                                <td class="col-eval" style="padding: 4px 6px; text-align: center;">${getEvalPillsHTML(patient, true)}</td>
                                 <td class="col-edad" style="padding: 6px 10px; text-align: center;">${sexLetter}</td>
                                 <td class="col-eval" style="padding: 6px 10px; text-align: center;">${firstAdmittedStr}</td>
                                 <td style="padding: 6px 10px; text-align: center;">
@@ -11275,23 +11500,27 @@ window.renderWardBedsGrid = async function() {
             });
 
             // Floating patients at the bottom of the table
-            if (floatingPatients.length > 0) {
+            let tableFloatingPatients = floatingPatients;
+            if (evalFilter !== 'all') {
+                tableFloatingPatients = floatingPatients.filter(p => p._matchesEvalFilter);
+            }
+            if (tableFloatingPatients.length > 0) {
                 const isFloatingCollapsedTable = collapsedRooms.includes('PACIENTES QUE YA NO ESTÁN EN EL SERVICIO') || collapsedRooms.includes('Pacientes sin Cama');
                 tableHTML += `
                     <tr style="background: #fdf2f8; font-weight: 800; color: #db2777; border-top: 2px solid #fbcfe8; height: 36px; cursor: pointer;" onclick="window.toggleRoomCollapse('PACIENTES QUE YA NO ESTÁN EN EL SERVICIO', 'room-group-floating-table')">
                         <td colspan="20" style="padding: 6px 10px; font-size: 0.8rem; border-bottom: 1px solid #fbcfe8; text-transform: uppercase;">
                             <div style="display:flex; justify-content:space-between; align-items:center;">
                                 <div>
-                                    <span class="room-toggle-icon" style="display:inline-block; transition: transform 0.2s ease; ${isFloatingCollapsedTable ? 'transform: rotate(-90deg);' : ''}">▼</span> ⚠️ PACIENTES QUE YA NO ESTÁN EN EL SERVICIO (${floatingPatients.length})
+                                    <span class="room-toggle-icon" style="display:inline-block; transition: transform 0.2s ease; ${isFloatingCollapsedTable ? 'transform: rotate(-90deg);' : ''}">▼</span> ⚠️ PACIENTES QUE YA NO ESTÁN EN EL SERVICIO (${tableFloatingPatients.length})
                                 </div>
-                                <button onclick="event.stopPropagation(); window.dischargeAllFloatingPatients();" style="background:#be123c; color:white; border:none; border-radius:6px; padding:3px 10px; font-size:0.72rem; font-weight:bold; cursor:pointer;" title="Dar de alta masiva a todos los pacientes que ya no están en este servicio">🧹 Dar de alta a todos (${floatingPatients.length})</button>
+                                <button onclick="event.stopPropagation(); window.dischargeAllFloatingPatients();" style="background:#be123c; color:white; border:none; border-radius:6px; padding:3px 10px; font-size:0.72rem; font-weight:bold; cursor:pointer;" title="Dar de alta masiva a todos los pacientes que ya no están en este servicio">🧹 Dar de alta a todos (${tableFloatingPatients.length})</button>
                             </div>
                         </td>
                     </tr>
                 `;
 
                 if (!isFloatingCollapsedTable) {
-                    floatingPatients.forEach(patient => {
+                    tableFloatingPatients.forEach(patient => {
                         const numFicha = patient.metadata?.num_ficha || '';
                         const ageStr = patient.edad || '--';
                         const imcNum = patient.peso_kg > 0 && patient.estatura_m > 0 ? (patient.peso_kg / (patient.estatura_m * patient.estatura_m)) : 0;
@@ -11340,7 +11569,7 @@ window.renderWardBedsGrid = async function() {
                                         <option value="Alto" ${patient.metadata?.riesgo_lpp === 'Alto' ? 'selected' : ''}>Alto</option>
                                     </select>
                                 </td>
-                                <td class="col-eval" style="padding: 6px 10px; text-align: center; font-weight:600;">${evalType}</td>
+                                <td class="col-eval" style="padding: 4px 6px; text-align: center;">${getEvalPillsHTML(patient, true)}</td>
                                 <td class="col-edad" style="padding: 6px 10px; text-align: center;">${sexLetter}</td>
                                 <td class="col-eval" style="padding: 6px 10px; text-align: center;">${fIngr}</td>
                                 <td style="padding: 6px 10px; text-align: center;">
@@ -11374,6 +11603,13 @@ window.renderWardBedsGrid = async function() {
         
         groupOrder.forEach((roomName, roomIndex) => {
             const bedsInRoom = groupedBeds[roomName];
+            const matchingInRoom = bedsInRoom.filter(b => {
+                const cleanB = b.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+                const p = matchedPatients.find(pat => pat.cama === b || (pat.cama && pat.cama.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === cleanB));
+                return p && (evalFilter === 'all' || p._matchesEvalFilter);
+            }).length;
+            if (evalFilter !== 'all' && matchingInRoom === 0) return;
+
             const elementId = `room-group-${roomIndex}`;
             
             // Calculate stats for this room
@@ -11433,6 +11669,11 @@ window.renderWardBedsGrid = async function() {
             bedsInRoom.forEach(bedName => {
                 const cleanB = bedName.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
                 const patient = matchedPatients.find(p => p.cama === bedName || (p.cama && p.cama.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === cleanB));
+                
+                if (evalFilter !== 'all' && (!patient || !patient._matchesEvalFilter)) {
+                    return;
+                }
+
                 const card = document.createElement('div');
                 
                 if (patient) {
@@ -11463,6 +11704,10 @@ window.renderWardBedsGrid = async function() {
                             </div>
                             ${regimen ? `<div style="font-size:0.75rem; color:#0f766e; font-weight:700; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:3px 6px; margin:4px 0;">🍲 ${regimen}</div>` : ''}
                             ${obsGen ? `<div style="font-size:0.68rem; color:#b45309; font-weight:600; background:#fffbeb; border:1px solid #fde68a; border-radius:6px; padding:3px 6px; margin-top:3px;">⚠️ ${obsGen}</div>` : ''}
+                            <div class="bed-eval-pills-row" style="display:flex; align-items:center; justify-content:space-between; margin-top:6px; padding-top:4px; border-top:1px dashed #e2e8f0;">
+                                <span style="font-size:0.68rem; font-weight:700; color:#64748b;">Evaluación:</span>
+                                ${getEvalPillsHTML(patient, false)}
+                            </div>
                         </div>
                         <div class="bed-actions-row">
                             <button class="circle-action-btn" title="Editar Ficha" onclick="loadPatient('${patient.id}')">📝</button>
@@ -11497,6 +11742,9 @@ window.renderWardBedsGrid = async function() {
 
         // 4. Render active patients who are not assigned to a bed in the configured bedsList (Floating / Cupos)
         floatingPatients = matchedPatients.filter(p => !bedsList.includes(p.cama));
+        if (evalFilter !== 'all') {
+            floatingPatients = floatingPatients.filter(p => p._matchesEvalFilter);
+        }
         if (floatingPatients.length > 0) {
             const elementId = `room-group-floating`;
             const isFloatingCollapsed = collapsedRooms.includes('PACIENTES QUE YA NO ESTÁN EN EL SERVICIO') || collapsedRooms.includes('Pacientes sin Cama');
@@ -11551,6 +11799,10 @@ window.renderWardBedsGrid = async function() {
                         <div class="patient-regime-row">
                             <div class="regime-formula" title="Fórmula">🍼 ${formula}</div>
                             <div class="regime-req" title="Requerimiento">⚡ ${tmtKcal} kcal</div>
+                        </div>
+                        <div class="bed-eval-pills-row" style="display:flex; align-items:center; justify-content:space-between; margin-top:6px; padding-top:4px; border-top:1px dashed #e2e8f0;">
+                            <span style="font-size:0.68rem; font-weight:700; color:#64748b;">Evaluación:</span>
+                            ${getEvalPillsHTML(patient, false)}
                         </div>
                     </div>
                     <div class="bed-actions-row">
