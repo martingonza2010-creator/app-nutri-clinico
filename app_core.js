@@ -1053,7 +1053,34 @@ function initCompactLayout() {
                     patologia_hta: document.getElementById('patologia_hta')?.checked || false,
                     patologia_erc: document.getElementById('patologia_erc')?.checked || false,
                     fecha_ingreso_servicio: document.getElementById('fecha_ingreso_servicio')?.value || '',
-                    nrs_score: document.getElementById('nrsTotalScore')?.innerText || 'No evaluado',
+                    nrs_score: (() => {
+                        const pType = AppState.patient.type || 'adult';
+                        if (pType === 'pediatric' || pType === 'neonate') {
+                            if (AppState.patient.strongkids && AppState.patient.strongkids.score !== undefined) return `${AppState.patient.strongkids.score} pts`;
+                            const skEl = document.getElementById('strongKidsTotalScore');
+                            if (skEl && skEl.innerText && skEl.innerText !== '--') return skEl.innerText;
+                        } else {
+                            if (AppState.patient.nrs2002 && AppState.patient.nrs2002.score !== undefined) return `${AppState.patient.nrs2002.score} pts`;
+                            const nrsEl = document.getElementById('nrsTotalScore');
+                            if (nrsEl && nrsEl.innerText && nrsEl.innerText !== '--') return nrsEl.innerText;
+                        }
+                        return 'No evaluado';
+                    })(),
+                    screening_score: (() => {
+                        const pType = AppState.patient.type || 'adult';
+                        if (pType === 'pediatric' || pType === 'neonate') {
+                            if (AppState.patient.strongkids && AppState.patient.strongkids.score !== undefined) return `${AppState.patient.strongkids.score} pts`;
+                            const skEl = document.getElementById('strongKidsTotalScore');
+                            if (skEl && skEl.innerText && skEl.innerText !== '--') return skEl.innerText;
+                        } else {
+                            if (AppState.patient.nrs2002 && AppState.patient.nrs2002.score !== undefined) return `${AppState.patient.nrs2002.score} pts`;
+                            const nrsEl = document.getElementById('nrsTotalScore');
+                            if (nrsEl && nrsEl.innerText && nrsEl.innerText !== '--') return nrsEl.innerText;
+                        }
+                        return 'No evaluado';
+                    })(),
+                    strongkids: AppState.patient.strongkids || {},
+                    nrs2002: AppState.patient.nrs2002 || {},
                     observaciones_generales: document.getElementById('observaciones_generales')?.value || '',
                     simulator: {
                         formula: document.getElementById('formulaSelect')?.value || "",
@@ -1137,7 +1164,40 @@ function initCompactLayout() {
                     user_id: AppState.user.id
                 };
 
-                const { error } = await supabaseClient.from('pacientes').insert([data]);
+                // Update local_ward_patients cache immediately if patient is in ward
+                try {
+                    let localWard = JSON.parse(localStorage.getItem('local_ward_patients') || '[]');
+                    const wIdx = localWard.findIndex(p => p.id === AppState.patient.id || (p.cama && p.cama === cama && cama !== ''));
+                    if (wIdx >= 0) {
+                        localWard[wIdx] = {
+                            ...localWard[wIdx],
+                            nombre,
+                            edad,
+                            peso_kg: peso,
+                            estatura_m: estatura,
+                            talla_cm: Math.round(estatura > 3 ? estatura : estatura * 100),
+                            sexo,
+                            diagnostico,
+                            metadata: {
+                                ...(localWard[wIdx].metadata || {}),
+                                ...metadata
+                            }
+                        };
+                        localStorage.setItem('local_ward_patients', JSON.stringify(localWard));
+                    }
+                } catch(e) {}
+
+                let error = null;
+                if (AppState.patient.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(AppState.patient.id)) {
+                    const res = await supabaseClient.from('pacientes').update(data).eq('id', AppState.patient.id);
+                    error = res.error;
+                } else {
+                    const res = await supabaseClient.from('pacientes').insert([data]);
+                    error = res.error;
+                    if (!error && res.data && res.data[0]) {
+                        AppState.patient.id = res.data[0].id;
+                    }
+                }
 
                 if (!error) {
                     showToast("✅ Ficha completa guardada en historial");
@@ -2320,6 +2380,21 @@ window.loadPatient = async (id) => {
         }
         if (document.getElementById('observaciones_generales')) {
             document.getElementById('observaciones_generales').value = (data.metadata && data.metadata.observaciones_generales) || '';
+        }
+
+        // Restore Screening (NRS 2002 & STRONGkids)
+        if (data.metadata && data.metadata.nrs2002) {
+            AppState.patient.nrs2002 = JSON.parse(JSON.stringify(data.metadata.nrs2002));
+            if (AppState.patient.nrs2002.initialAnswers) {
+                Object.entries(AppState.patient.nrs2002.initialAnswers).forEach(([qId, val]) => {
+                    if (typeof window.setNrsInitialState === 'function') window.setNrsInitialState(qId, val);
+                });
+            }
+            if (typeof window.calculateNRS2002 === 'function') window.calculateNRS2002();
+        }
+        if (data.metadata && data.metadata.strongkids) {
+            AppState.patient.strongkids = JSON.parse(JSON.stringify(data.metadata.strongkids));
+            if (typeof window.calculateStrongKids === 'function') window.calculateStrongKids();
         }
 
         // Auto select Ingesta Oral diet from Dietools regimen metadata
@@ -8717,6 +8792,25 @@ window.calculateStrongKids = () => {
     if (!AppState.patient.strongkids) AppState.patient.strongkids = {};
     AppState.patient.strongkids.score = total;
     AppState.patient.strongkids.classification = classif;
+    const scrgText = `${total} pts`;
+    if (AppState.patient.id) {
+        try {
+            let localCache = JSON.parse(localStorage.getItem('local_ward_patients') || '[]');
+            const pIdx = localCache.findIndex(p => p.id === AppState.patient.id);
+            if (pIdx >= 0) {
+                localCache[pIdx].metadata = localCache[pIdx].metadata || {};
+                localCache[pIdx].metadata.nrs_score = scrgText;
+                localCache[pIdx].metadata.screening_score = scrgText;
+                localCache[pIdx].metadata.strongkids = AppState.patient.strongkids;
+                localStorage.setItem('local_ward_patients', JSON.stringify(localCache));
+            }
+        } catch(e) {}
+        const scrgCell = document.getElementById(`table_scrg_${AppState.patient.id}`);
+        if (scrgCell) {
+            const bgStyle = total >= 4 ? 'background:#fee2e2; color:#c0392b; font-weight:800; border-radius:4px; padding:2px 6px;' : (total >= 1 ? 'background:#fef3c7; color:#92400e; font-weight:700; border-radius:4px; padding:2px 6px;' : 'background:#dcfce7; color:#166534; font-weight:700; border-radius:4px; padding:2px 6px;');
+            scrgCell.innerHTML = `<span style="${bgStyle}">${scrgText}</span>`;
+        }
+    }
 };
 
 window.setNrsInitialState = (qId, value) => {
@@ -8808,6 +8902,23 @@ window.calculateNRS2002 = () => {
         AppState.patient.nrs2002.statusScore = 0;
         AppState.patient.nrs2002.severityScore = 0;
         AppState.patient.nrs2002.ageScore = 0;
+        if (AppState.patient.id) {
+            try {
+                let localCache = JSON.parse(localStorage.getItem('local_ward_patients') || '[]');
+                const pIdx = localCache.findIndex(p => p.id === AppState.patient.id);
+                if (pIdx >= 0) {
+                    localCache[pIdx].metadata = localCache[pIdx].metadata || {};
+                    localCache[pIdx].metadata.nrs_score = '0 pts';
+                    localCache[pIdx].metadata.screening_score = '0 pts';
+                    localCache[pIdx].metadata.nrs2002 = AppState.patient.nrs2002;
+                    localStorage.setItem('local_ward_patients', JSON.stringify(localCache));
+                }
+            } catch(e) {}
+            const scrgCell = document.getElementById(`table_scrg_${AppState.patient.id}`);
+            if (scrgCell) {
+                scrgCell.innerHTML = `<span style="background:#dcfce7; color:#166534; font-weight:700; border-radius:4px; padding:2px 6px;">0 pts</span>`;
+            }
+        }
     } else {
         // ESCENARIO B: Al menos un SÍ en Screening Inicial
         if (finalSection) finalSection.style.display = 'block';
@@ -8868,6 +8979,25 @@ window.calculateNRS2002 = () => {
         AppState.patient.nrs2002.statusScore = statusVal;
         AppState.patient.nrs2002.severityScore = severityVal;
         AppState.patient.nrs2002.ageScore = ageScore;
+        const scrgText = `${total} pts`;
+        if (AppState.patient.id) {
+            try {
+                let localCache = JSON.parse(localStorage.getItem('local_ward_patients') || '[]');
+                const pIdx = localCache.findIndex(p => p.id === AppState.patient.id);
+                if (pIdx >= 0) {
+                    localCache[pIdx].metadata = localCache[pIdx].metadata || {};
+                    localCache[pIdx].metadata.nrs_score = scrgText;
+                    localCache[pIdx].metadata.screening_score = scrgText;
+                    localCache[pIdx].metadata.nrs2002 = AppState.patient.nrs2002;
+                    localStorage.setItem('local_ward_patients', JSON.stringify(localCache));
+                }
+            } catch(e) {}
+            const scrgCell = document.getElementById(`table_scrg_${AppState.patient.id}`);
+            if (scrgCell) {
+                const bgStyle = total >= 3 ? 'background:#fee2e2; color:#c0392b; font-weight:800; border-radius:4px; padding:2px 6px;' : 'background:#dcfce7; color:#166534; font-weight:700; border-radius:4px; padding:2px 6px;';
+                scrgCell.innerHTML = `<span style="${bgStyle}">${scrgText}</span>`;
+            }
+        }
     }
 };
 
@@ -10253,6 +10383,52 @@ window.parseSmartHeight = function(val) {
     return { meters: parseFloat(meters.toFixed(4)), cm: Math.round(cm) };
 };
 
+window.computeNutritionalStatusAbbrev = function(imcNum, age) {
+    if (!imcNum || isNaN(imcNum) || imcNum <= 0) return { abbrev: '--', bgStyle: 'background:#dcfce7; color:#166534; font-weight:700;' };
+    const isElderly = (age || 0) >= 65;
+    if (isElderly) {
+        if (imcNum < 23) return { abbrev: 'BP', bgStyle: 'background:#fee2e2; color:#991b1b; font-weight:800;' };
+        if (imcNum < 28) return { abbrev: 'N', bgStyle: 'background:#dcfce7; color:#166534; font-weight:700;' };
+        if (imcNum < 32) return { abbrev: 'SP', bgStyle: 'background:#fef3c7; color:#92400e; font-weight:700;' };
+        return { abbrev: 'OB', bgStyle: 'background:#ffedd5; color:#c2410c; font-weight:700;' };
+    } else {
+        if (imcNum < 18.5) return { abbrev: 'BP', bgStyle: 'background:#fee2e2; color:#991b1b; font-weight:800;' };
+        if (imcNum < 25) return { abbrev: 'N', bgStyle: 'background:#dcfce7; color:#166534; font-weight:700;' };
+        if (imcNum < 30) return { abbrev: 'SP', bgStyle: 'background:#fef3c7; color:#92400e; font-weight:700;' };
+        return { abbrev: 'OB', bgStyle: 'background:#ffedd5; color:#c2410c; font-weight:700;' };
+    }
+};
+
+window.calculateTableIMC = function(patientId) {
+    const row = document.getElementById(`row_pat_${patientId}`);
+    if (!row) return;
+
+    const pesoInput = row.querySelector('.input-table-peso');
+    const tallaInput = row.querySelector('.input-table-talla');
+    const imcCell = document.getElementById(`table_imc_${patientId}`);
+    const estCell = document.getElementById(`table_est_${patientId}`);
+
+    if (!pesoInput || !tallaInput || !imcCell || !estCell) return;
+
+    const peso = parseFloat(pesoInput.value) || 0;
+    const rawTalla = tallaInput.value;
+    const { meters } = window.parseSmartHeight(rawTalla);
+
+    if (peso > 0 && meters > 0) {
+        const imcNum = peso / (meters * meters);
+        imcCell.innerText = imcNum.toFixed(1).replace('.', ',');
+
+        const age = parseFloat(row.dataset.age) || 0;
+        const { abbrev, bgStyle } = window.computeNutritionalStatusAbbrev(imcNum, age);
+        estCell.innerText = abbrev;
+        estCell.style = `padding: 6px 10px; text-align: center; ${bgStyle}`;
+    } else {
+        imcCell.innerText = '--';
+        estCell.innerText = '--';
+        estCell.style = 'padding: 6px 10px; text-align: center; font-weight:700; color:#1e3a8a;';
+    }
+};
+
 window.quickUpdatePatientField = async function(id, field, value) {
     let updateObj = {};
     let updatedMetadata = {};
@@ -10270,12 +10446,20 @@ window.quickUpdatePatientField = async function(id, field, value) {
             else if (field === 'peso_kg') {
                 locPat.peso_kg = value ? parseFloat(value) : 0;
                 const { meters } = window.parseSmartHeight(locPat.estatura_m || locPat.talla_cm);
-                if (meters > 0 && locPat.peso_kg > 0) locPat.metadata.imc = parseFloat((locPat.peso_kg / (meters * meters)).toFixed(1));
+                if (meters > 0 && locPat.peso_kg > 0) {
+                    locPat.metadata.imc = parseFloat((locPat.peso_kg / (meters * meters)).toFixed(1));
+                    locPat.metadata.estado_nutricional = window.computeNutritionalStatusAbbrev(locPat.metadata.imc, locPat.edad).abbrev;
+                }
+                if (typeof window.calculateTableIMC === 'function') window.calculateTableIMC(id);
             } else if (field === 'talla_cm' || field === 'estatura_m') {
                 const { meters, cm } = window.parseSmartHeight(value);
                 locPat.talla_cm = cm;
                 locPat.estatura_m = meters;
-                if (locPat.peso_kg && meters > 0) locPat.metadata.imc = parseFloat((locPat.peso_kg / (meters * meters)).toFixed(1));
+                if (locPat.peso_kg && meters > 0) {
+                    locPat.metadata.imc = parseFloat((locPat.peso_kg / (meters * meters)).toFixed(1));
+                    locPat.metadata.estado_nutricional = window.computeNutritionalStatusAbbrev(locPat.metadata.imc, locPat.edad).abbrev;
+                }
+                if (typeof window.calculateTableIMC === 'function') window.calculateTableIMC(id);
             } else if (field === 'num_ficha') locPat.metadata.num_ficha = value;
             else if (field === 'patologia_dm') locPat.metadata.patologia_dm = !!value;
             else if (field === 'patologia_hta') locPat.metadata.patologia_hta = !!value;
@@ -10303,13 +10487,19 @@ window.quickUpdatePatientField = async function(id, field, value) {
                 const pKg = value ? parseFloat(value) : null;
                 updateObj.peso_kg = pKg;
                 const { meters } = window.parseSmartHeight(p.estatura_m || p.talla_cm);
-                if (meters > 0 && pKg > 0) updatedMetadata.imc = parseFloat((pKg / (meters * meters)).toFixed(1));
+                if (meters > 0 && pKg > 0) {
+                    updatedMetadata.imc = parseFloat((pKg / (meters * meters)).toFixed(1));
+                    updatedMetadata.estado_nutricional = window.computeNutritionalStatusAbbrev(updatedMetadata.imc, p.edad).abbrev;
+                }
                 updateObj.metadata = updatedMetadata;
             } else if (field === 'talla_cm' || field === 'estatura_m') {
                 const { meters, cm } = window.parseSmartHeight(value);
                 updateObj.talla_cm = cm || null;
                 updateObj.estatura_m = meters || null;
-                if (p.peso_kg && meters > 0) updatedMetadata.imc = parseFloat((p.peso_kg / (meters * meters)).toFixed(1));
+                if (p.peso_kg && meters > 0) {
+                    updatedMetadata.imc = parseFloat((p.peso_kg / (meters * meters)).toFixed(1));
+                    updatedMetadata.estado_nutricional = window.computeNutritionalStatusAbbrev(updatedMetadata.imc, p.edad).abbrev;
+                }
                 updateObj.metadata = updatedMetadata;
             } else if (field === 'num_ficha') {
                 updatedMetadata.num_ficha = value;
@@ -11527,7 +11717,26 @@ window.renderWardBedsGrid = async function(silent = false) {
                         let dietText = regimenVal ? (dietDetail ? `${regimenVal} | ${dietDetail}` : regimenVal) : (dietDetail || 'Normal');
 
                         // NRS score
-                        const nrsVal = patient.metadata?.nrs_score || patient.tmt || '--';
+                        // SCRG (Screening) column
+                        let nrsVal = '--';
+                        let nrsBgStyle = 'color: #1e3a8a; font-weight: 700;';
+                        const rawScrg = patient.metadata?.screening_score || patient.metadata?.nrs_score || patient.metadata?.nrs2002?.score || patient.metadata?.strongkids?.score || patient.metadata?.assessment?.cribaje?.nrs;
+                        if (rawScrg !== undefined && rawScrg !== null && rawScrg !== '' && rawScrg !== 'No evaluado' && rawScrg !== '--') {
+                            if (typeof rawScrg === 'number') {
+                                nrsVal = `${rawScrg} pts`;
+                                if (rawScrg >= 3) nrsBgStyle = 'background:#fee2e2; color:#c0392b; font-weight:800; border-radius:4px; padding:2px 6px;';
+                                else nrsBgStyle = 'background:#dcfce7; color:#166534; font-weight:700; border-radius:4px; padding:2px 6px;';
+                            } else {
+                                nrsVal = String(rawScrg);
+                                if (nrsVal.includes('pts')) {
+                                    const num = parseInt(nrsVal);
+                                    if (!isNaN(num)) {
+                                        if (num >= 3) nrsBgStyle = 'background:#fee2e2; color:#c0392b; font-weight:800; border-radius:4px; padding:2px 6px;';
+                                        else nrsBgStyle = 'background:#dcfce7; color:#166534; font-weight:700; border-radius:4px; padding:2px 6px;';
+                                    }
+                                }
+                            }
+                        }
 
                         // Evaluacion type
                         const evalType = patient.metadata?.patient_type === 'pediatric' ? 'Peds' : (patient.metadata?.patient_type === 'neonate' ? 'Neo' : 'VGO');
@@ -11552,7 +11761,7 @@ window.renderWardBedsGrid = async function(silent = false) {
                         }
 
                         tableHTML += `
-                            <tr style="${rowStyle}">
+                            <tr id="row_pat_${patient.id}" data-patient-id="${patient.id}" data-age="${patient.edad || 0}" style="${rowStyle}">
                                 <td class="col-cama" style="padding: 0;"><div class="resizable-tr">🛏️ ${bedName}</div></td>
                                 <td class="col-ficha" style="padding: 0;"><div class="resizable-tr"><input type="text" value="${numFicha}" placeholder="Ficha / RUT" style="width:100%; border:none; background:transparent; font-size:0.72rem; font-weight:bold; color:#475569; outline:none;" onchange="window.quickUpdatePatientField('${patient.id}', 'num_ficha', this.value)" title="Número de Ficha / RUT (Editar)"></div></td>
                                 <td class="col-nombre" style="padding: 2px 6px; line-height: 1.2;">
@@ -11566,11 +11775,11 @@ window.renderWardBedsGrid = async function(silent = false) {
                                 <td class="col-patologia" style="padding: 2px; text-align: center; background:#fdf2f8; border-right:1px solid #e2e8f0;"><input type="checkbox" ${patient.metadata?.patologia_erc ? 'checked' : ''} onchange="window.quickUpdatePatientField('${patient.id}', 'patologia_erc', this.checked)" style="cursor:pointer; width:15px; height:15px; accent-color:#dc2626;" title="ERC (Marcar/Desmarcar)"></td>
                                 <td class="col-dieta" style="padding: 2px 4px;"><textarea placeholder="Régimen / Dietoterapia" style="width:100%; border:none; background:transparent; font-size:0.7rem; color:#0f766e; font-weight:600; outline:none; resize:vertical; font-family:inherit; min-height:22px; line-height:1.2;" onchange="window.quickUpdatePatientField('${patient.id}', 'regimen', this.value)" title="Dietoterapia (Editar)">${dietText}</textarea></td>
                                 <td class="col-obs" style="padding: 2px 4px;"><textarea placeholder="Observaciones..." style="width:100%; border:none; background:transparent; font-size:0.65rem; color:#64748b; outline:none; resize:vertical; font-family:inherit; min-height:22px; line-height:1.2;" onchange="window.quickUpdatePatientField('${patient.id}', 'obs_generales', this.value)" title="Observaciones (Editar - Alt+Enter o Enter para nueva línea)">${customObs || ''}</textarea></td>
-                                <td class="col-antropo" style="padding: 2px; text-align: center;"><input type="number" step="0.1" value="${patient.peso_kg || ''}" placeholder="--" style="width:100%; border:none; background:transparent; text-align:center; font-weight:700; font-size:0.75rem; color:#1e293b; outline:none;" onchange="window.quickUpdatePatientField('${patient.id}', 'peso_kg', this.value)" title="Peso (Editar)"></td>
-                                <td class="col-antropo" style="padding: 2px; text-align: center;"><input type="number" step="0.1" value="${patient.talla_cm || (patient.estatura_m ? Math.round(patient.estatura_m * 100) : '')}" placeholder="--" style="width:100%; border:none; background:transparent; text-align:center; font-size:0.75rem; color:#1e293b; outline:none;" onchange="window.quickUpdatePatientField('${patient.id}', 'talla_cm', this.value)" title="Talla cm (Editar)"></td>
-                                <td class="col-imc" style="padding: 6px 10px; text-align: center; font-weight:700; color:#1e3a8a;">${imcStr}</td>
-                                <td class="col-imc" style="padding: 6px 10px; text-align: center; font-weight:700; color:#1e3a8a;">${abbrevStatus}</td>
-                                <td class="col-nrs" style="padding: 6px 10px; text-align: center;">${nrsVal}</td>
+                                <td class="col-antropo" style="padding: 2px; text-align: center;"><input type="number" step="0.1" value="${patient.peso_kg || ''}" placeholder="--" class="input-table-peso" style="width:100%; border:none; background:transparent; text-align:center; font-weight:700; font-size:0.75rem; color:#1e293b; outline:none;" oninput="window.calculateTableIMC('${patient.id}')" onchange="window.quickUpdatePatientField('${patient.id}', 'peso_kg', this.value)" title="Peso (Editar)"></td>
+                                <td class="col-antropo" style="padding: 2px; text-align: center;"><input type="number" step="0.1" value="${patient.talla_cm || (patient.estatura_m ? Math.round(patient.estatura_m * 100) : '')}" placeholder="--" class="input-table-talla" style="width:100%; border:none; background:transparent; text-align:center; font-size:0.75rem; color:#1e293b; outline:none;" oninput="window.calculateTableIMC('${patient.id}')" onchange="window.quickUpdatePatientField('${patient.id}', 'talla_cm', this.value)" title="Talla cm (Editar)"></td>
+                                <td class="col-imc" id="table_imc_${patient.id}" style="padding: 6px 10px; text-align: center; font-weight:700; color:#1e3a8a;">${imcStr}</td>
+                                <td class="col-imc" id="table_est_${patient.id}" style="padding: 6px 10px; text-align: center; ${statusBgStyle}">${abbrevStatus}</td>
+                                <td class="col-nrs" id="table_scrg_${patient.id}" style="padding: 6px 10px; text-align: center;"><span style="${nrsBgStyle}">${nrsVal}</span></td>
                                 <td class="col-lpp" style="padding: 2px; text-align: center;">
                                     <select onchange="window.quickUpdatePatientField('${patient.id}', 'riesgo_lpp', this.value)" style="border:none; background:transparent; font-weight:700; font-size:0.7rem; color:${patient.metadata?.riesgo_lpp === 'Alto' ? '#ef4444' : (patient.metadata?.riesgo_lpp === 'Medio' ? '#f59e0b' : '#10b981')}; outline:none; cursor:pointer;" title="Riesgo LPP (Editar)">
                                         <option value="Sin evaluar" ${!patient.metadata?.riesgo_lpp || patient.metadata?.riesgo_lpp === 'Sin evaluar' ? 'selected' : ''}>--</option>
@@ -11639,14 +11848,33 @@ window.renderWardBedsGrid = async function(silent = false) {
                             }
                         }
                         const dietText = (patient.metadata?.regimen || 'Normal');
-                        const nrsVal = patient.metadata?.nrs_score || patient.tmt || '--';
+                        // SCRG (Screening) column for floating patients
+                        let nrsVal = '--';
+                        let nrsBgStyle = 'color: #db2777; font-weight: 700;';
+                        const rawScrg = patient.metadata?.screening_score || patient.metadata?.nrs_score || patient.metadata?.nrs2002?.score || patient.metadata?.strongkids?.score || patient.metadata?.assessment?.cribaje?.nrs;
+                        if (rawScrg !== undefined && rawScrg !== null && rawScrg !== '' && rawScrg !== 'No evaluado' && rawScrg !== '--') {
+                            if (typeof rawScrg === 'number') {
+                                nrsVal = `${rawScrg} pts`;
+                                if (rawScrg >= 3) nrsBgStyle = 'background:#fee2e2; color:#c0392b; font-weight:800; border-radius:4px; padding:2px 6px;';
+                                else nrsBgStyle = 'background:#dcfce7; color:#166534; font-weight:700; border-radius:4px; padding:2px 6px;';
+                            } else {
+                                nrsVal = String(rawScrg);
+                                if (nrsVal.includes('pts')) {
+                                    const num = parseInt(nrsVal);
+                                    if (!isNaN(num)) {
+                                        if (num >= 3) nrsBgStyle = 'background:#fee2e2; color:#c0392b; font-weight:800; border-radius:4px; padding:2px 6px;';
+                                        else nrsBgStyle = 'background:#dcfce7; color:#166534; font-weight:700; border-radius:4px; padding:2px 6px;';
+                                    }
+                                }
+                            }
+                        }
                         const evalType = patient.metadata?.patient_type === 'pediatric' ? 'Peds' : (patient.metadata?.patient_type === 'neonate' ? 'Neo' : 'VGO');
                         const sexLetter = patient.sexo === 'm' ? 'M' : (patient.sexo === 'f' ? 'F' : '--');
                         const fIngr = patient.metadata?.fecha_ingreso_servicio || '--';
                         const dateStr = patient.created_at ? `${String(new Date(patient.created_at).getDate()).padStart(2, '0')}-${String(new Date(patient.created_at).getMonth() + 1).padStart(2, '0')}` : '';
 
                         tableHTML += `
-                            <tr style="background: #fff5f8; border-bottom: 1px solid #fbcfe8; height: 42px;">
+                            <tr id="row_pat_${patient.id}" data-patient-id="${patient.id}" data-age="${patient.edad || 0}" style="background: #fff5f8; border-bottom: 1px solid #fbcfe8; height: 42px;">
                                 <td class="col-cama" style="padding: 0;"><div class="resizable-tr" style="color: #db2777;">📋 Sin Cama</div></td>
                                 <td class="col-ficha" style="padding: 0;"><div class="resizable-tr"><input type="text" value="${numFicha}" placeholder="Ficha / RUT" style="width:100%; border:none; background:transparent; font-size:0.72rem; font-weight:bold; color:#475569; outline:none;" onchange="window.quickUpdatePatientField('${patient.id}', 'num_ficha', this.value)" title="Número de Ficha / RUT (Editar)"></div></td>
                                 <td class="col-nombre" style="padding: 2px 6px; line-height: 1.2;">
@@ -11660,11 +11888,11 @@ window.renderWardBedsGrid = async function(silent = false) {
                                 <td class="col-patologia" style="padding: 2px; text-align: center; background:#fdf2f8; border-right:1px solid #e2e8f0;"><input type="checkbox" ${patient.metadata?.patologia_erc ? 'checked' : ''} onchange="window.quickUpdatePatientField('${patient.id}', 'patologia_erc', this.checked)" style="cursor:pointer; width:15px; height:15px; accent-color:#dc2626;" title="ERC (Marcar/Desmarcar)"></td>
                                 <td class="col-dieta" style="padding: 2px 4px;"><input type="text" value="${dietText}" placeholder="Régimen / Dietoterapia" style="width:100%; border:none; background:transparent; font-size:0.7rem; color:#0f766e; font-weight:600; outline:none;" onchange="window.quickUpdatePatientField('${patient.id}', 'regimen', this.value)" title="Dietoterapia (Editar)"></td>
                                 <td class="col-obs" style="padding: 2px 4px;"><input type="text" value="${patient.metadata?.observaciones_generales || ''}" placeholder="Observaciones..." style="width:100%; border:none; background:transparent; font-size:0.65rem; color:#64748b; outline:none;" onchange="window.quickUpdatePatientField('${patient.id}', 'obs_generales', this.value)" title="Observaciones (Editar)"></td>
-                                <td class="col-antropo" style="padding: 2px; text-align: center;"><input type="number" step="0.1" value="${patient.peso_kg || ''}" placeholder="--" style="width:100%; border:none; background:transparent; text-align:center; font-weight:700; font-size:0.75rem; color:#1e293b; outline:none;" onchange="window.quickUpdatePatientField('${patient.id}', 'peso_kg', this.value, true)" title="Peso (Editar)"></td>
-                                <td class="col-antropo" style="padding: 2px; text-align: center;"><input type="number" step="0.1" value="${patient.talla_cm || ''}" placeholder="--" style="width:100%; border:none; background:transparent; text-align:center; font-size:0.75rem; color:#1e293b; outline:none;" onchange="window.quickUpdatePatientField('${patient.id}', 'talla_cm', this.value, true)" title="Talla cm (Editar)"></td>
-                                <td class="col-imc" style="padding: 6px 10px; text-align: center; font-weight:700; color:#9d174d;">${imcStr}</td>
-                                <td class="col-imc" style="padding: 6px 10px; text-align: center; font-weight:700; color:#9d174d;">${abbrevStatus}</td>
-                                <td class="col-nrs" style="padding: 6px 10px; text-align: center;">${nrsVal}</td>
+                                <td class="col-antropo" style="padding: 2px; text-align: center;"><input type="number" step="0.1" value="${patient.peso_kg || ''}" placeholder="--" class="input-table-peso" style="width:100%; border:none; background:transparent; text-align:center; font-weight:700; font-size:0.75rem; color:#1e293b; outline:none;" oninput="window.calculateTableIMC('${patient.id}')" onchange="window.quickUpdatePatientField('${patient.id}', 'peso_kg', this.value, true)" title="Peso (Editar)"></td>
+                                <td class="col-antropo" style="padding: 2px; text-align: center;"><input type="number" step="0.1" value="${patient.talla_cm || ''}" placeholder="--" class="input-table-talla" style="width:100%; border:none; background:transparent; text-align:center; font-size:0.75rem; color:#1e293b; outline:none;" oninput="window.calculateTableIMC('${patient.id}')" onchange="window.quickUpdatePatientField('${patient.id}', 'talla_cm', this.value, true)" title="Talla cm (Editar)"></td>
+                                <td class="col-imc" id="table_imc_${patient.id}" style="padding: 6px 10px; text-align: center; font-weight:700; color:#9d174d;">${imcStr}</td>
+                                <td class="col-imc" id="table_est_${patient.id}" style="padding: 6px 10px; text-align: center; font-weight:700; color:#9d174d;">${abbrevStatus}</td>
+                                <td class="col-nrs" id="table_scrg_${patient.id}" style="padding: 6px 10px; text-align: center;"><span style="${nrsBgStyle}">${nrsVal}</span></td>
                                 <td class="col-lpp" style="padding: 2px; text-align: center;">
                                     <select onchange="window.quickUpdatePatientField('${patient.id}', 'riesgo_lpp', this.value)" style="border:none; background:transparent; font-weight:700; font-size:0.7rem; color:${patient.metadata?.riesgo_lpp === 'Alto' ? '#ef4444' : (patient.metadata?.riesgo_lpp === 'Medio' ? '#f59e0b' : '#10b981')}; outline:none; cursor:pointer;" title="Riesgo LPP (Editar)">
                                         <option value="Sin evaluar" ${!patient.metadata?.riesgo_lpp || patient.metadata?.riesgo_lpp === 'Sin evaluar' ? 'selected' : ''}>--</option>
