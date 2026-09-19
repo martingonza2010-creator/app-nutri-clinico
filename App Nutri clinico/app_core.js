@@ -10932,15 +10932,15 @@ window.togglePatientEvalStatus = async function(patientId, evalType, event) {
 
     let p = localCache.find(x => String(x.id) === String(patientId));
 
+    if (!p && AppState.patient && String(AppState.patient.id) === String(patientId)) {
+        p = AppState.patient;
+    }
+
     if (!p && typeof supabaseClient !== 'undefined' && supabaseClient) {
         try {
             const { data: dbP } = await supabaseClient.from('pacientes').select('*').eq('id', patientId).maybeSingle();
             if (dbP) p = dbP;
         } catch(e) {}
-    }
-
-    if (!p && AppState.patient && String(AppState.patient.id) === String(patientId)) {
-        p = AppState.patient;
     }
 
     if (!p) {
@@ -10951,9 +10951,14 @@ window.togglePatientEvalStatus = async function(patientId, evalType, event) {
     p.metadata = p.metadata || {};
     const nowIso = new Date().toISOString();
 
+    let isViActive = false;
+    let isVgoActive = false;
+
     if (evalType === 'vi') {
         const currentVal = Boolean(p.metadata.has_vi);
         p.metadata.has_vi = !currentVal;
+        isViActive = p.metadata.has_vi;
+        isVgoActive = Boolean(p.metadata.has_vgo);
         if (!currentVal) {
             p.metadata.fecha_vi = nowIso;
             p.metadata.fecha_evaluacion = nowIso;
@@ -10967,8 +10972,11 @@ window.togglePatientEvalStatus = async function(patientId, evalType, event) {
     } else if (evalType === 'vgo') {
         const currentVal = Boolean(p.metadata.has_vgo);
         p.metadata.has_vgo = !currentVal;
+        isVgoActive = p.metadata.has_vgo;
+        isViActive = Boolean(p.metadata.has_vi);
         if (!currentVal) {
             p.metadata.has_vgo = true;
+            isVgoActive = true;
             p.metadata.fecha_vgo = nowIso;
             p.metadata.fecha_evaluacion = nowIso;
             p.evaluado = true;
@@ -10980,7 +10988,32 @@ window.togglePatientEvalStatus = async function(patientId, evalType, event) {
         }
     }
 
-    // Update local cache
+    // 1. Instant Optimistic DOM Update on the clicked button (Zero latency, smooth 60fps)
+    const btn = event?.currentTarget;
+    if (btn) {
+        if (evalType === 'vi') {
+            btn.innerHTML = isViActive ? '✓ VI' : '○ VI';
+            btn.style.background = isViActive ? '#10b981' : '#f1f5f9';
+            btn.style.color = isViActive ? 'white' : '#64748b';
+            btn.style.border = isViActive ? '1px solid #059669' : '1px solid #cbd5e1';
+        } else if (evalType === 'vgo') {
+            btn.innerHTML = isVgoActive ? '✓ VGO' : '○ VGO';
+            btn.style.background = isVgoActive ? '#3b82f6' : '#f1f5f9';
+            btn.style.color = isVgoActive ? 'white' : '#64748b';
+            btn.style.border = isVgoActive ? '1px solid #2563eb' : '1px solid #cbd5e1';
+        }
+
+        // If newly evaluated today, hide the ⚠️ reeval tag immediately next to the button
+        if ((evalType === 'vi' && isViActive) || (evalType === 'vgo' && isVgoActive)) {
+            const container = btn.parentElement;
+            if (container) {
+                const reevalBadge = container.querySelector('.badge-reeval');
+                if (reevalBadge) reevalBadge.style.display = 'none';
+            }
+        }
+    }
+
+    // 2. Update local cache
     const cacheIdx = localCache.findIndex(x => String(x.id) === String(patientId));
     if (cacheIdx >= 0) {
         localCache[cacheIdx] = { ...localCache[cacheIdx], ...p, metadata: p.metadata, evaluado: p.evaluado };
@@ -10994,34 +11027,41 @@ window.togglePatientEvalStatus = async function(patientId, evalType, event) {
         AppState.patient.evaluado = p.evaluado;
     }
 
-    // Sync to Supabase in background
+    // 3. Sync to Supabase in background asynchronously (fire-and-forget, non-blocking)
     if (typeof supabaseClient !== 'undefined' && supabaseClient && !String(patientId).startsWith('pat_')) {
-        try {
-            await supabaseClient.from('pacientes').update({
-                evaluado: p.evaluado,
-                metadata: p.metadata,
-                updated_at: new Date()
-            }).eq('id', patientId);
-        } catch(e) {
+        supabaseClient.from('pacientes').update({
+            evaluado: p.evaluado,
+            metadata: p.metadata,
+            updated_at: new Date()
+        }).eq('id', patientId).then(() => {}).catch(e => {
             console.warn("Error updating eval status in Supabase:", e);
-        }
+        });
     }
 
-    // Re-render ward grid immediately
+    // 4. Update view silently in background so the table never blanks or closes
     if (typeof window.renderWardBedsGrid === 'function') {
-        window.renderWardBedsGrid();
+        window.renderWardBedsGrid(true);
     }
 };
 
-window.renderWardBedsGrid = async function() {
+window.renderWardBedsGrid = async function(silent = false) {
     const activeLocStr = localStorage.getItem('activeLocation');
     if (!activeLocStr) return;
     const activeLoc = JSON.parse(activeLocStr);
     
     const grid = document.getElementById('wardBedsGrid');
     if (!grid) return;
+
+    // Preserve scroll positions to prevent jumping
+    const scrollY = window.scrollY;
+    const prevScrollDiv = grid.querySelector('div[style*="overflow-x"]');
+    const scrollX = prevScrollDiv ? prevScrollDiv.scrollLeft : 0;
     
-    grid.innerHTML = '<p style="opacity:0.5; text-align:center; padding: 40px;">Cargando salas y camas...</p>';
+    // Only show "Cargando..." on cold initial load when grid is completely empty
+    const hasExistingContent = grid.children.length > 0 && !grid.innerHTML.includes('Cargando salas');
+    if (!silent && !hasExistingContent) {
+        grid.innerHTML = '<p style="opacity:0.5; text-align:center; padding: 40px;">Cargando salas y camas...</p>';
+    }
     
     // Check if admin is logged in to show bed tools
     const userEmail = AppState.user?.email || '';
@@ -11591,6 +11631,13 @@ window.renderWardBedsGrid = async function() {
             `;
 
             grid.innerHTML = tableHTML;
+            if (scrollX > 0) {
+                const newScrollDiv = grid.querySelector('div[style*="overflow-x"]');
+                if (newScrollDiv) newScrollDiv.scrollLeft = scrollX;
+            }
+            if (window.scrollY !== scrollY) {
+                window.scrollTo({ top: scrollY, behavior: 'instant' });
+            }
             if (typeof window.initTableColumnResizing === 'function') {
                 setTimeout(window.initTableColumnResizing, 50);
             }
@@ -11817,6 +11864,10 @@ window.renderWardBedsGrid = async function() {
             roomGroup.innerHTML = headerHTML;
             roomGroup.appendChild(bedsGridDiv);
             grid.appendChild(roomGroup);
+        }
+
+        if (window.scrollY !== scrollY) {
+            window.scrollTo({ top: scrollY, behavior: 'instant' });
         }
         
     } catch (err) {
