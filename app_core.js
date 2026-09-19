@@ -1041,9 +1041,20 @@ function initCompactLayout() {
                 const tmt = parseFloat(document.getElementById('goalTotal')?.value) || 0;
 
                 // FULL STATE PERSISTENCE V3.51
-                const activeLocStr = localStorage.getItem('activeLocation');
+                const currentRegimen = (() => {
+                    const dietSelect = document.getElementById('oralDietType');
+                    if (dietSelect && dietSelect.value && dietSelect.value !== 'custom') {
+                        const rawOpt = dietSelect.options[dietSelect.selectedIndex]?.text || '';
+                        return rawOpt.replace(/\s*\(\d+\s*kcal\)/i, '').trim();
+                    }
+                    return AppState.patient.metadata?.regimen || '';
+                })();
+                const currentVia = document.getElementById('viaAlimentacionSelect')?.value || (AppState.patient.metadata?.via_alimentacion || 'auto');
+
                 const metadata = {
                     patient_type: AppState.patient.type || 'adult',
+                    regimen: currentRegimen,
+                    via_alimentacion: currentVia,
                     weight_history: AppState.patient.weight_history || [],
                     location: activeLocStr ? JSON.parse(activeLocStr) : null,
                     num_ficha: document.getElementById('num_ficha')?.value || '',
@@ -2314,6 +2325,7 @@ window.loadPatient = async (id) => {
 
         AppState.patient.id = data.id;
         AppState.patient.ia_report = data.ia_report || null;
+        AppState.patient.metadata = JSON.parse(JSON.stringify(data.metadata || {}));
 
         if (data.metadata && data.metadata.patient_type) {
             const pType = data.metadata.patient_type;
@@ -2397,22 +2409,44 @@ window.loadPatient = async (id) => {
             if (typeof window.calculateStrongKids === 'function') window.calculateStrongKids();
         }
 
+        // Restore viaAlimentacionSelect if stored
+        const viaSelect = document.getElementById('viaAlimentacionSelect');
+        if (viaSelect) {
+            viaSelect.value = data.metadata?.via_alimentacion || 'auto';
+        }
+
         // Auto select Ingesta Oral diet from Dietools regimen metadata
         if (data.metadata && data.metadata.regimen) {
-            const regText = data.metadata.regimen.toLowerCase();
+            const regText = data.metadata.regimen.toLowerCase().trim();
             const oralSelect = document.getElementById('oralDietType');
             if (oralSelect) {
-                if (regText.includes('hipoglucidica') || regText.includes('hpgl')) oralSelect.value = 'hipoglucidica';
-                else if (regText.includes('hiperproteica') || regText.includes('hpprt')) oralSelect.value = 'hyperproteico';
-                else if (regText.includes('papilla') && regText.includes('livian')) oralSelect.value = 'papilla_liviana';
-                else if (regText.includes('papilla')) oralSelect.value = 'papilla_diabetico';
-                else if (regText.includes('hiposodica')) oralSelect.value = 'hiposodico';
-                else if (regText.includes('liviana')) oralSelect.value = 'liviano';
-                else if (regText.includes('blanda')) oralSelect.value = 'blando_sin_residuos';
-                else if (regText.includes('hipercalorica')) oralSelect.value = 'hypercalorico';
-                else if (regText.includes('hipocalorica')) oralSelect.value = 'hipocalorico';
-                else if (regText.includes('hipoproteica')) oralSelect.value = 'hipoproteico';
-                else oralSelect.value = 'custom';
+                let matched = false;
+                for (let i = 0; i < oralSelect.options.length; i++) {
+                    const optText = oralSelect.options[i].text.toLowerCase();
+                    const cleanOpt = optText.replace(/\s*\(\d+\s*kcal\)/i, '').trim();
+                    const optVal = oralSelect.options[i].value.toLowerCase();
+                    if (optVal !== 'custom' && (optText.includes(regText) || regText.includes(cleanOpt) || cleanOpt.includes(regText))) {
+                        oralSelect.selectedIndex = i;
+                        matched = true;
+                        break;
+                    }
+                }
+                if (!matched) {
+                    if (regText.includes('hipoglucidica') || regText.includes('hpgl') || regText.includes('diabetico') || regText.includes('chandi')) oralSelect.value = 'papilla_diabetico';
+                    else if (regText.includes('hiperproteica') || regText.includes('hpprt')) oralSelect.value = 'hyperproteico';
+                    else if (regText.includes('papilla') && regText.includes('livian')) oralSelect.value = 'papilla_liviana';
+                    else if (regText.includes('papilla')) oralSelect.value = 'papilla';
+                    else if (regText.includes('hiposodica') || regText.includes('hpsd')) oralSelect.value = 'hiposodico';
+                    else if (regText.includes('chanli') || regText.includes('liviana') || regText.includes('liv')) oralSelect.value = 'liviano';
+                    else if (regText.includes('blanda') || regText.includes('sres') || regText.includes('sin residuo')) oralSelect.value = 'blando_sin_residuos';
+                    else if (regText.includes('hipercalorica')) oralSelect.value = 'hypercalorico';
+                    else if (regText.includes('hipocalorica')) oralSelect.value = 'hipocalorico';
+                    else if (regText.includes('hipoproteica')) oralSelect.value = 'hipoproteico';
+                    else if (regText.includes('cero') || regText.includes('regce') || regText.includes('ayuno')) oralSelect.value = 'cero';
+                    else if (regText.includes('liquido') || regText.includes('liqfr')) oralSelect.value = 'liquido';
+                    else if (regText.includes('comun') || regText.includes('normal')) oralSelect.value = 'comun';
+                    else oralSelect.value = 'custom';
+                }
 
                 oralSelect.dispatchEvent(new Event('change'));
             }
@@ -4089,8 +4123,15 @@ function initSimulatorLogic() {
     // Escuchas para regímenes predefinidos y barra de consumo
     const oralDietType = document.getElementById('oralDietType');
     const oralIntakePercent = document.getElementById('oralIntakePercent');
+    const viaAlimentacionSelect = document.getElementById('viaAlimentacionSelect');
     if (oralDietType) oralDietType.addEventListener('change', updateOralIntakePreset);
     if (oralIntakePercent) oralIntakePercent.addEventListener('input', updateOralIntakeSlider);
+    if (viaAlimentacionSelect) {
+        viaAlimentacionSelect.addEventListener('change', () => {
+            if (!AppState.patient.metadata) AppState.patient.metadata = {};
+            AppState.patient.metadata.via_alimentacion = viaAlimentacionSelect.value;
+        });
+    }
 
     // Si el usuario edita de forma manual los campos, revertir a "Personalizado" y 100% de barra
     document.querySelectorAll('.input-oral').forEach(inp => {
@@ -4440,37 +4481,214 @@ function renderFormulaBInputs() {
     }
 }
 
-// --- CONSTANTE DE REGÍMENES CLÍNICOS PEDIÁTRICOS ---
+// --- CONSTANTE DE REGÍMENES CLÍNICOS ---
 const ORAL_PRESETS = {
-    blando_sin_residuos: { kcal: 1874, prot: 74, cho: 309, lip: 38 },
+    comun: { kcal: 2000, prot: 80, cho: 280, lip: 60 },
     liviano: { kcal: 2055, prot: 84.5, cho: 292, lip: 46.6 },
+    blando: { kcal: 1900, prot: 75, cho: 270, lip: 55 },
+    blando_sin_residuos: { kcal: 1874, prot: 74, cho: 309, lip: 38 },
+    papilla: { kcal: 1600, prot: 70, cho: 230, lip: 45 },
+    papilla_liviana: { kcal: 1587, prot: 63.5, cho: 217, lip: 47.2 },
+    papilla_diabetico: { kcal: 1537, prot: 77.2, cho: 192, lip: 47.5 },
     hiposodico: { kcal: 2063, prot: 82, cho: 297, lip: 45.7 },
     hypercalorico: { kcal: 2445, prot: 113.8, cho: 366, lip: 48.1 },
     hyperproteico: { kcal: 2448, prot: 132, cho: 348, lip: 46 },
     hipocalorico: { kcal: 1486, prot: 75.7, cho: 165, lip: 44 },
     hipoproteico: { kcal: 1925, prot: 25, cho: 314, lip: 46 },
-    papilla_diabetico: { kcal: 1537, prot: 77.2, cho: 192, lip: 47.5 },
-    papilla_liviana: { kcal: 1587, prot: 63.5, cho: 217, lip: 47.2 },
     hipoglucidico: { kcal: 1480, prot: 97.2, cho: 151, lip: 44.3 },
     isoglucidico_160: { kcal: 1530, prot: 97.4, cho: 165, lip: 41 },
-    isoglucidico_200: { kcal: 1634, prot: 111.5, cho: 198, lip: 43 }
+    isoglucidico_200: { kcal: 1634, prot: 111.5, cho: 198, lip: 43 },
+    liquido: { kcal: 1200, prot: 45, cho: 190, lip: 30 },
+    cero: { kcal: 0, prot: 0, cho: 0, lip: 0 }
+};
+
+window.detectFeedingRoute = () => {
+    const viaSel = document.getElementById('viaAlimentacionSelect')?.value;
+    if (viaSel && viaSel !== 'auto') {
+        return viaSel;
+    }
+    
+    // Auto-detection
+    const hasEnteral = !!(document.getElementById('formulaSelect')?.value && parseFloat(document.getElementById('volume')?.value) > 0);
+    const hasIV = !!(document.getElementById('ivType')?.value && parseFloat(document.getElementById('ivVolume')?.value) > 0);
+    const dietSelect = document.getElementById('oralDietType');
+    const oralKcal = parseFloat(document.getElementById('oralKcal')?.value) || 0;
+    const isCero = dietSelect && dietSelect.value === 'cero';
+    const hasOral = (dietSelect && dietSelect.value && dietSelect.value !== 'custom' && !isCero) || oralKcal > 0;
+
+    if (isCero) return 'cero';
+    if (hasIV && !hasEnteral && !hasOral) return 'parenteral_central';
+    if (hasEnteral && hasOral) return 'mixta';
+    if (hasEnteral) return 'sng';
+    if (hasOral) return 'oral';
+    return 'oral';
+};
+
+window.getFeedingRouteLabel = (routeKey) => {
+    switch (routeKey) {
+        case 'oral': return 'Vía Oral';
+        case 'sng': return 'Sonda Nasogástrica (SNG)';
+        case 'sne': return 'Sonda Nasoyeyunal (SNE)';
+        case 'gtt': return 'Gastrostomía (GTT)';
+        case 'yey': return 'Yeyunostomía (YEY)';
+        case 'mixta': return 'Vía Mixta (Oral + Enteral)';
+        case 'parenteral_central': return 'Vía Central (Parenteral)';
+        case 'parenteral_periferica': return 'Vía Periférica (Parenteral)';
+        case 'cero': return 'Régimen Cero (Ayuno)';
+        default: return 'Vía Oral';
+    }
+};
+
+window.getSelectedRegimenName = () => {
+    const dietSelect = document.getElementById('oralDietType');
+    if (dietSelect && dietSelect.value && dietSelect.value !== 'custom') {
+        const rawOpt = dietSelect.options[dietSelect.selectedIndex]?.text || '';
+        return rawOpt.replace(/\s*\(\d+\s*kcal\)/i, '').trim();
+    }
+    if (AppState.patient?.metadata?.regimen) {
+        return AppState.patient.metadata.regimen.trim();
+    }
+    return '';
+};
+
+window.syncOralDietToWardAndState = () => {
+    const dietSelect = document.getElementById('oralDietType');
+    if (!dietSelect) return;
+    let cleanName = '';
+    if (dietSelect.value !== 'custom') {
+        const rawOpt = dietSelect.options[dietSelect.selectedIndex]?.text || '';
+        cleanName = rawOpt.replace(/\s*\(\d+\s*kcal\)/i, '').trim();
+    } else {
+        cleanName = AppState.patient?.metadata?.regimen || '';
+    }
+
+    if (!AppState.patient.metadata) AppState.patient.metadata = {};
+    if (cleanName) {
+        AppState.patient.metadata.regimen = cleanName;
+    }
+
+    const patientId = AppState.patient.id;
+    if (patientId) {
+        // 1. Update local_ward_patients
+        try {
+            let localCache = JSON.parse(localStorage.getItem('local_ward_patients') || '[]');
+            const pIdx = localCache.findIndex(p => p.id === patientId || (p.cama && p.cama === AppState.patient.cama && p.cama !== ''));
+            if (pIdx >= 0) {
+                if (!localCache[pIdx].metadata) localCache[pIdx].metadata = {};
+                localCache[pIdx].metadata.regimen = cleanName;
+                localStorage.setItem('local_ward_patients', JSON.stringify(localCache));
+            }
+        } catch(e) {}
+
+        // 2. Update visible table cell if rendered
+        const row = document.querySelector(`tr[data-patient-id="${patientId}"]`);
+        if (row) {
+            const dietInput = row.querySelector('.col-dieta textarea, .col-dieta input');
+            if (dietInput && cleanName) {
+                dietInput.value = cleanName;
+            }
+        }
+
+        // 3. Update Supabase if valid UUID
+        if (cleanName && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(patientId)) {
+            if (typeof window.quickUpdatePatientField === 'function') {
+                window.quickUpdatePatientField(patientId, 'regimen', cleanName);
+            }
+        }
+    }
+};
+
+window.generateDietoterapiaString = (kcalFinal, protFinal, pesoCalc) => {
+    let aporteStr = `${kcalFinal} kcal`;
+    if (pesoCalc > 0) {
+        aporteStr += ` (${(kcalFinal / pesoCalc).toFixed(1)} kcal/kg)`;
+    }
+    aporteStr += ` / ${protFinal} g proteína`;
+    if (pesoCalc > 0) {
+        aporteStr += ` (${(parseFloat(protFinal) / pesoCalc).toFixed(2)} g/kg)`;
+    }
+
+    const regimenName = window.getSelectedRegimenName ? window.getSelectedRegimenName() : '';
+    const route = window.detectFeedingRoute ? window.detectFeedingRoute() : 'oral';
+    const routeLabel = window.getFeedingRouteLabel ? window.getFeedingRouteLabel(route) : 'Vía Oral';
+
+    // Enteral info
+    let enteralStr = '';
+    const fId = document.getElementById('formulaSelect')?.value;
+    const formula = AppState.formulas?.find(f => f.id === fId);
+    const volVal = parseFloat(document.getElementById('volume')?.value) || 0;
+    const timesVal = parseInt(document.getElementById('volumeTimes')?.value) || 1;
+    const volTotal = volVal * timesVal;
+    if (formula && volTotal > 0) {
+        enteralStr = `Soporte Enteral: ${formula.name} (${timesVal > 1 ? `${volVal} ml x ${timesVal}` : `${volTotal} ml`}`;
+        const dilVal = document.getElementById('dilution')?.value;
+        if (dilVal && parseFloat(dilVal) > 0) enteralStr += `, Dilución: ${dilVal}%`;
+        enteralStr += `)`;
+    }
+
+    // Parenteral info
+    let ivStr = '';
+    const ivType = document.getElementById('ivType')?.value;
+    const ivVol = parseFloat(document.getElementById('ivVolume')?.value) || 0;
+    if (ivType && ivVol > 0) {
+        ivStr = `Soporte Parenteral: ${ivType} (${ivVol} ml)`;
+    }
+
+    // Modules info
+    let modParts = [];
+    if (parseFloat(document.getElementById('modNessucar')?.value) > 0) modParts.push(`Nessucar ${document.getElementById('modNessucar').value}g`);
+    if (parseFloat(document.getElementById('modMCT')?.value) > 0) modParts.push(`MCT Oil ${document.getElementById('modMCT').value}g`);
+    if (parseFloat(document.getElementById('modEnterex')?.value) > 0) modParts.push(`Enterex ${document.getElementById('modEnterex').value}g`);
+    if (parseFloat(document.getElementById('modBanatrol')?.value) > 0) modParts.push(`Banatrol ${document.getElementById('modBanatrol').value}g`);
+    if (parseFloat(document.getElementById('modProteinex')?.value) > 0) modParts.push(`Proteinex ${document.getElementById('modProteinex').value}g`);
+    if (parseFloat(document.getElementById('modFresubin')?.value) > 0) modParts.push(`Fresubin Protein ${document.getElementById('modFresubin').value}g`);
+    const modStr = modParts.length > 0 ? `Módulos: ${modParts.join(', ')}` : '';
+
+    let baseDiet = '';
+    if (route === 'cero' || (regimenName && /cero|ayuno/i.test(regimenName))) {
+        baseDiet = 'Régimen Cero (Ayuno)';
+    } else if (route === 'oral' || (!enteralStr && !ivStr)) {
+        if (regimenName) {
+            baseDiet = `Régimen ${regimenName} distribuido en 4 servicios principales`;
+        } else {
+            baseDiet = `Régimen común según indicación clínica distribuido en 4 servicios principales`;
+        }
+    } else if (route === 'mixta' || (regimenName && enteralStr)) {
+        const oralPart = regimenName ? `Régimen ${regimenName} distribuido en 4 servicios principales` : 'Alimentación Oral';
+        baseDiet = `${oralPart} + ${enteralStr} por ${routeLabel}`;
+    } else if (enteralStr) {
+        baseDiet = `${enteralStr} por ${routeLabel}`;
+    } else if (ivStr) {
+        baseDiet = `${ivStr} por ${routeLabel}`;
+    } else {
+        baseDiet = regimenName ? `Régimen ${regimenName}` : 'Régimen según indicación clínica';
+    }
+
+    let result = baseDiet;
+    if (modStr) result += ` | ${modStr}`;
+    result += ` | Aporte: ${aporteStr}`;
+    return result;
 };
 
 function updateOralIntakePreset() {
-    const diet = document.getElementById('oralDietType').value;
-    const percent = parseFloat(document.getElementById('oralIntakePercent').value) || 100;
+    const dietSelect = document.getElementById('oralDietType');
+    if (!dietSelect) return;
+    const diet = dietSelect.value;
+    const percent = parseFloat(document.getElementById('oralIntakePercent')?.value) || 100;
     
-    if (diet === 'custom') return;
-    
-    const preset = ORAL_PRESETS[diet];
-    if (preset) {
-        document.getElementById('oralKcal').value = Math.round(preset.kcal * (percent / 100));
-        document.getElementById('oralProt').value = (preset.prot * (percent / 100)).toFixed(1);
-        document.getElementById('oralCHO').value = (preset.cho * (percent / 100)).toFixed(1);
-        document.getElementById('oralLip').value = (preset.lip * (percent / 100)).toFixed(1);
-        
-        runSimulation();
+    if (diet !== 'custom') {
+        const preset = ORAL_PRESETS[diet];
+        if (preset) {
+            document.getElementById('oralKcal').value = Math.round(preset.kcal * (percent / 100));
+            document.getElementById('oralProt').value = (preset.prot * (percent / 100)).toFixed(1);
+            document.getElementById('oralCHO').value = (preset.cho * (percent / 100)).toFixed(1);
+            document.getElementById('oralLip').value = (preset.lip * (percent / 100)).toFixed(1);
+            runSimulation();
+        }
     }
+
+    // Sync selected regimen with patient state and ward censo
+    window.syncOralDietToWardAndState();
 }
 
 function updateOralIntakeSlider() {
@@ -6679,26 +6897,8 @@ function initGlobalEvents() {
             aporteStr += ` (${(parseFloat(protFinal) / pesoCalc).toFixed(2)} g/kg)`;
         }
 
-        let regimenParts = [];
-        const dietSelect = document.getElementById('oralDietType');
-        if (dietSelect && dietSelect.value !== 'custom') {
-            const rawOpt = dietSelect.options[dietSelect.selectedIndex].text;
-            const cleanOpt = rawOpt.replace(/\s*\(\d+\s*kcal\)/i, '');
-            regimenParts.push(`Régimen: ${cleanOpt}`);
-        }
-        if (formula) {
-            let fStr = `Fórmula: ${formula.name} (${volText}`;
-            const dilVal = document.getElementById('dilution')?.value;
-            if (dilVal && parseFloat(dilVal) > 0) fStr += `, Dilución: ${dilVal}%`;
-            fStr += `)`;
-            regimenParts.push(fStr);
-        }
-        if (modulesText) {
-            regimenParts.push(`Módulos: ${modulesText.slice(0, -2)}`);
-        }
-
-        const regimenAdded = regimenParts.length > 0 ? regimenParts.join(' | ') : 'Régimen: Según indicación clínica';
-        const dietoterapia = `${regimenAdded} | ${aporteStr}\nSe realizará control de exámenes, ingesta, deposiciones, y suplementación en caso de no cubrir requerimientos nutricionales.`;
+        const dietoterapiaFinalBase = window.generateDietoterapiaString ? window.generateDietoterapiaString(kcalFinal, protFinal, pesoCalc) : aporteStr;
+        const dietoterapia = `${dietoterapiaFinalBase}\nSe realizará control de exámenes, ingesta, deposiciones, y suplementación en caso de no cubrir requerimientos nutricionales.`;
 
         const userName = AppState.user?.user_metadata?.full_name || "[Nombre del Profesional]";
 
@@ -6862,14 +7062,7 @@ ${nutriSign}  - Nutricionista UPC Neonatal`;
             const distSign = getToggleVal('sintomaDistension') === 'sí' ? '+' : '-';
             const gSign = getToggleVal('sintomaGases') === 'sí' ? '+' : '-';
 
-            const regimenVal = document.getElementById('regimenSelect')?.value || 'N/A';
-            const viaVal = document.getElementById('viaSelect')?.value || 'N/A';
-            let dietoterapiaFinal = `Régimen ${regimenVal}`;
-            if (viaVal === 'oral') {
-                dietoterapiaFinal += ` distribuido en 4 servicios principales`;
-            } else {
-                dietoterapiaFinal += ` por ${viaVal === 'enteral' ? 'SNG/SNE' : 'Vía Central'} | ${dietoterapia}`;
-            }
+            const dietoterapiaFinal = dietoterapiaFinalBase;
 
             viText = `INGRESO NUTRICIONAL 
 
@@ -7109,25 +7302,7 @@ Hospital Regional de Antofagasta`;
             aporteStr += ` (${(parseFloat(protFinal) / pesoAportes).toFixed(2)} g/kg)`;
         }
 
-        let regimenParts = [];
-        const dietSelect = document.getElementById('oralDietType');
-        if (dietSelect && dietSelect.value !== 'custom') {
-            const rawOpt = dietSelect.options[dietSelect.selectedIndex].text;
-            const cleanOpt = rawOpt.replace(/\s*\(\d+\s*kcal\)/i, '');
-            regimenParts.push(`Régimen: ${cleanOpt}`);
-        }
-        if (formula) {
-            let fStr = `Fórmula: ${formula.name} (${volText}`;
-            const dilVal = document.getElementById('dilution')?.value;
-            if (dilVal && parseFloat(dilVal) > 0) fStr += `, Dilución: ${dilVal}%`;
-            fStr += `)`;
-            regimenParts.push(fStr);
-        }
-        if (modulesText) {
-            regimenParts.push(`Módulos: ${modulesText.slice(0, -2)}`);
-        }
-
-        const dietoterapiaStr = regimenParts.length > 0 ? `${regimenParts.join(' | ')} | ${aporteStr}` : 'Según indicación clínica';
+        const dietoterapiaStr = window.generateDietoterapiaString ? window.generateDietoterapiaString(kcalFinal, protFinal, pesoAportes) : (regimenParts.length > 0 ? `${regimenParts.join(' | ')} | ${aporteStr}` : 'Según indicación clínica');
 
         // Obtener cargo de firma dinámicamente según el servicio seleccionado
         const cargoFirma = window.getVGOServiceSignature ? window.getVGOServiceSignature() : "Nutricionista clínica";

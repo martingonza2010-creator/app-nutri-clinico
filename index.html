@@ -1375,19 +1375,39 @@
                                     <div class="mini-input">
                                         <label style="font-weight:700; color:var(--primary); font-size:0.75rem;">Seleccionar Régimen Clínico</label>
                                         <select id="oralDietType" style="padding:8px; border-radius:8px; border:1px solid rgba(0,0,0,0.1); width:100%; font-size:0.85rem;">
-                                            <option value="custom">-- Personalizado --</option>
-                                            <option value="blando_sin_residuos">Blando sin Residuos (1874 kcal)</option>
+                                            <option value="custom">-- Personalizado / Según Ficha --</option>
+                                            <option value="comun">Común / Normal (2000 kcal)</option>
                                             <option value="liviano">Liviano (2055 kcal)</option>
+                                            <option value="blando">Blando común (1900 kcal)</option>
+                                            <option value="blando_sin_residuos">Blando sin Residuos (1874 kcal)</option>
+                                            <option value="papilla">Papilla común (1600 kcal)</option>
+                                            <option value="papilla_liviana">Papilla Liviana (1587 kcal)</option>
+                                            <option value="papilla_diabetico">Papilla Diabético (1537 kcal)</option>
                                             <option value="hiposodico">Hiposódico (2063 kcal)</option>
                                             <option value="hypercalorico">Hipercalórico (2445 kcal)</option>
                                             <option value="hyperproteico">Hiperproteico (2448 kcal)</option>
                                             <option value="hipocalorico">Hipocalórico (1486 kcal)</option>
                                             <option value="hipoproteico">Hipoproteico (1925 kcal)</option>
-                                            <option value="papilla_diabetico">Papilla Diabético (1537 kcal)</option>
-                                            <option value="papilla_liviana">Papilla Liviana (1587 kcal)</option>
                                             <option value="hipoglucidico">Hipoglucídico (1480 kcal)</option>
                                             <option value="isoglucidico_160">Iso Glucídico 160 (1530 kcal)</option>
                                             <option value="isoglucidico_200">Isoglucídico 200 (1634 kcal)</option>
+                                            <option value="liquido">Líquido (1200 kcal)</option>
+                                            <option value="cero">Régimen Cero (Ayuno)</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="mini-input" style="margin-top:2px;">
+                                        <label style="font-weight:700; color:var(--primary); font-size:0.75rem;">Vía de Alimentación</label>
+                                        <select id="viaAlimentacionSelect" style="padding:8px; border-radius:8px; border:1px solid rgba(0,0,0,0.1); width:100%; font-size:0.85rem;">
+                                            <option value="auto">Auto-detectar (Según Soporte Nutricional)</option>
+                                            <option value="oral">Vía Oral</option>
+                                            <option value="sng">Sonda Nasogástrica (SNG)</option>
+                                            <option value="sne">Sonda Nasoyeyunal (SNE)</option>
+                                            <option value="gtt">Gastrostomía (GTT)</option>
+                                            <option value="yey">Yeyunostomía (YEY)</option>
+                                            <option value="mixta">Mixta (Oral + Enteral)</option>
+                                            <option value="parenteral_central">Parenteral (Vía Central)</option>
+                                            <option value="parenteral_periferica">Parenteral (Vía Periférica)</option>
                                         </select>
                                     </div>
                                     
