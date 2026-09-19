@@ -1055,6 +1055,18 @@ function initCompactLayout() {
                     patient_type: AppState.patient.type || 'adult',
                     regimen: currentRegimen,
                     via_alimentacion: currentVia,
+                    fecha_nacimiento: document.getElementById('fechaNacimiento')?.value || '',
+                    evo_examenes: document.getElementById('evoExamenes')?.value || '',
+                    evo_tolerancia: document.getElementById('evoTolerancia')?.value || '',
+                    anamnesis: AppState.patient.anamnesis || {},
+                    neonatal: {
+                        eg_semanas: document.getElementById('egSemanas')?.value || '',
+                        eg_dias: document.getElementById('egDias')?.value || '',
+                        peso_nacimiento: document.getElementById('pesoNacimiento')?.value || '',
+                        talla_nacimiento: document.getElementById('tallaNacimiento')?.value || '',
+                        pc_nacimiento: document.getElementById('pcNacimiento')?.value || '',
+                        pcefalico: document.getElementById('pcefalico')?.value || ''
+                    },
                     weight_history: AppState.patient.weight_history || [],
                     location: activeLocStr ? JSON.parse(activeLocStr) : null,
                     num_ficha: document.getElementById('num_ficha')?.value || '',
@@ -2392,6 +2404,53 @@ window.loadPatient = async (id) => {
         }
         if (document.getElementById('observaciones_generales')) {
             document.getElementById('observaciones_generales').value = (data.metadata && data.metadata.observaciones_generales) || '';
+        }
+        if (document.getElementById('fechaNacimiento')) {
+            document.getElementById('fechaNacimiento').value = (data.metadata && data.metadata.fecha_nacimiento) || '';
+        }
+        if (document.getElementById('evoExamenes')) {
+            document.getElementById('evoExamenes').value = (data.metadata && data.metadata.evo_examenes) || '';
+        }
+        if (document.getElementById('evoTolerancia')) {
+            document.getElementById('evoTolerancia').value = (data.metadata && data.metadata.evo_tolerancia) || '';
+        }
+        if (document.getElementById('diagnosticoPES')) {
+            document.getElementById('diagnosticoPES').value = (data.metadata && (data.metadata.assessment?.pes || data.metadata.pes)) || '';
+        }
+
+        // Restore Anamnesis Symptoms & Gastro Signs
+        if (data.metadata && data.metadata.anamnesis) {
+            AppState.patient.anamnesis = JSON.parse(JSON.stringify(data.metadata.anamnesis));
+            Object.entries(AppState.patient.anamnesis).forEach(([id, val]) => {
+                if (typeof window.setToggleState === 'function') window.setToggleState(id, val);
+            });
+        }
+
+        // Restore Anthropometric Assessment
+        if (data.metadata && data.metadata.assessment) {
+            const ass = data.metadata.assessment;
+            if (ass.braquial && document.getElementById('cbraquial')) document.getElementById('cbraquial').value = ass.braquial;
+            if (ass.cintura && document.getElementById('ccintura')) document.getElementById('ccintura').value = ass.cintura;
+            if (ass.pantorrilla && document.getElementById('cpantorrilla')) document.getElementById('cpantorrilla').value = ass.pantorrilla;
+            if (ass.atr && document.getElementById('altrodilla')) document.getElementById('altrodilla').value = ass.atr;
+            if (ass.pliegues) {
+                if (ass.pliegues.pt && document.getElementById('ptricipital')) document.getElementById('ptricipital').value = ass.pliegues.pt;
+                if (ass.pliegues.pb && document.getElementById('pbicipital')) document.getElementById('pbicipital').value = ass.pliegues.pb;
+                if (ass.pliegues.ps && document.getElementById('piliaco')) document.getElementById('piliaco').value = ass.pliegues.ps;
+                if (ass.pliegues.pa && document.getElementById('pabdominal')) document.getElementById('pabdominal').value = ass.pliegues.pa;
+            }
+            if (ass.edema && document.getElementById('edemaGrade')) document.getElementById('edemaGrade').value = ass.edema;
+        }
+
+        // Restore Neonatal Fields
+        if (data.metadata && data.metadata.neonatal) {
+            const neo = data.metadata.neonatal;
+            if (neo.eg_semanas && document.getElementById('egSemanas')) document.getElementById('egSemanas').value = neo.eg_semanas;
+            if (neo.eg_dias && document.getElementById('egDias')) document.getElementById('egDias').value = neo.eg_dias;
+            if (neo.peso_nacimiento && document.getElementById('pesoNacimiento')) document.getElementById('pesoNacimiento').value = neo.peso_nacimiento;
+            if (neo.talla_nacimiento && document.getElementById('tallaNacimiento')) document.getElementById('tallaNacimiento').value = neo.talla_nacimiento;
+            if (neo.pc_nacimiento && document.getElementById('pcNacimiento')) document.getElementById('pcNacimiento').value = neo.pc_nacimiento;
+            if (neo.pcefalico && document.getElementById('pcefalico')) document.getElementById('pcefalico').value = neo.pcefalico;
         }
 
         // Restore Screening (NRS 2002 & STRONGkids)
