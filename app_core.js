@@ -306,7 +306,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (btnLogoutHeader) btnLogoutHeader.onclick = logout;
 
     const safelyInit = (fn, name) => {
-        try { fn(); } catch (e) { console.error(`âŒ Init Error (${name}):`, e); }
+        try { fn(); } catch (e) { console.error(`❌ Init Error (${name}):`, e); }
     };
 
     safelyInit(initCompactLayout, "CompactLayout");
@@ -395,7 +395,7 @@ window.login = async function () {
     }
 
     if (!supabaseClient) {
-        alert("ðŸ”´ Error Crítico: Supabase no se cargó. Revisa tu conexión a internet.");
+        alert("🔴 Error Crítico: Supabase no se cargó. Revisa tu conexión a internet.");
         return;
     }
 
@@ -1110,7 +1110,7 @@ function initCompactLayout() {
                             return null;
                         }).filter(Boolean),
                         cribaje: {
-                            nrs: document.getElementById('nrs2002')?.value || "",
+                            nrs: document.getElementById('nrs2002')?.value || (AppState.patient.nrs2002 ? `${AppState.patient.nrs2002.score || 0} pts - ${AppState.patient.nrs2002.classification || ''}` : (document.getElementById('nrsTotalScore')?.innerText ? `${document.getElementById('nrsTotalScore').innerText} (${document.getElementById('nrsClassif')?.innerText || ''})` : "")),
                             vgs: document.getElementById('vgs')?.value || ""
                         },
                         gi: {
@@ -1732,7 +1732,7 @@ window.openQuickView = async (id) => {
 
     const html = `
         <div style="text-align:center; margin-bottom:15px;">
-            <div style="font-size:2.5rem; margin-bottom:5px;">ðŸ›Œ</div>
+            <div style="font-size:2.5rem; margin-bottom:5px;">🛏️</div>
             <h3 style="color:var(--primary); margin:0;">${p.nombre}</h3>
             <span style="font-size:0.8rem; background:#f0f2f5; padding:2px 8px; border-radius:10px;">Cama ${p.cama || 'S/N'}</span>
         </div>
@@ -1799,14 +1799,14 @@ async function generateShiftHandoff() {
                 <td><b>${p.nombre}</b><br><span style="font-size:0.75rem; color:#555;">${p.edad}a | ${p.peso_kg}kg</span></td>
                 <td>${p.diagnostico || '--'}</td>
                 <td>${p.tmt ? Math.round(p.tmt) : '--'} kcal</td>
-                <td>${p.estado_sala === 'critico' ? '⚠️ CRÍTICO' : 'En Curso'}</td>
+                <td>${p.estado_sala === 'critico' ? '⚠️  CRÍTICO' : 'En Curso'}</td>
             </tr>
         `;
     });
 
     const reportHTML = `
         <div style="text-align:center; margin-bottom:20px; font-family:'Poppins', sans-serif;">
-            <h2 style="margin:0; color:#333;">ðŸ¥ Reporte Entrega de Turno: SEDILE HRA</h2>
+            <h2 style="margin:0; color:#333;">🏥 Reporte Entrega de Turno: SEDILE HRA</h2>
             <p style="margin:5px 0 0 0; color:#666;">Generado el: ${new Date().toLocaleString('es-CL')}</p>
         </div>
         <table class="print-table">
@@ -2200,7 +2200,7 @@ function initEvolutionLogic() {
             }
 
             btnLog.disabled = true;
-            btnLog.innerText = "â³ Registrando...";
+            btnLog.innerText = "⏳ Registrando...";
 
             try {
                 const metadata = {
@@ -3517,6 +3517,7 @@ function renderPediatricZScores() {
     let zHFA = getZScore('hfa', m, p.sexo, cm);
     let zBMI = getZScore('bmi', m, p.sexo, p.bmi);
     let zWFH = getZScore('wfh', cm, p.sexo, p.peso);
+    p.zScores = { wfa: zWFA, hfa: zHFA, bmi: zBMI, wfh: zWFH };
 
     let html = '';
 
@@ -3526,9 +3527,9 @@ function renderPediatricZScores() {
     }
 
     if (specCond === 'down') {
-        html += `<div style="grid-column:1/-1; background:rgba(211,84,0,0.1); padding:4px; border-radius:4px; margin-bottom:4px; color:#d35400; font-size:0.65rem; text-align:center;">ðŸ“Š <b>Zemel (S. Down):</b> Evaluando curvas LMS vía Interpolación Geométrica (Hitos).</div>`;
+        html += `<div style="grid-column:1/-1; background:rgba(211,84,0,0.1); padding:4px; border-radius:4px; margin-bottom:4px; color:#d35400; font-size:0.65rem; text-align:center;">📊 <b>Zemel (S. Down):</b> Evaluando curvas LMS vía Interpolación Geométrica (Hitos).</div>`;
     } else if (specCond.startsWith('cp_')) {
-        html += `<div style="grid-column:1/-1; background:rgba(142,68,173,0.1); padding:4px; border-radius:4px; margin-bottom:4px; color:#8e44ad; font-size:0.65rem; text-align:center;">ðŸ“Š <b>Brooks (Parálisis Cerebral):</b> Evaluando curvas GMFCS vía Interpolación Geométrica.</div>`;
+        html += `<div style="grid-column:1/-1; background:rgba(142,68,173,0.1); padding:4px; border-radius:4px; margin-bottom:4px; color:#8e44ad; font-size:0.65rem; text-align:center;">📊 <b>Brooks (Parálisis Cerebral):</b> Evaluando curvas GMFCS vía Interpolación Geométrica.</div>`;
     }
 
     const makeBadge = (title, z, textOverride = null, colorOverride = null) => {
@@ -3552,7 +3553,10 @@ function renderPediatricZScores() {
         }
 
         const diagHtml = diag ? `<span style="font-size:0.55rem; padding:2px 3px; background:${color}20; border-radius:4px; font-weight:700;">${diag}</span>` : '';
-        return `<div style="background:#fff; border:1px solid ${color}; padding:5px; border-radius:6px; text-align:center; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
+        let badgeIdAttr = '';
+        if (title.includes('IMC/E') || title.includes('P/T')) badgeIdAttr = ' id="valZBMI"';
+        else if (title.includes('T/E') || title.includes('Talla/Edad')) badgeIdAttr = ' id="valZHFA"';
+        return `<div${badgeIdAttr} style="background:#fff; border:1px solid ${color}; padding:5px; border-radius:6px; text-align:center; box-shadow:0 2px 4px rgba(0,0,0,0.02);">
             <div style="font-size:0.55rem; color:#666; font-weight:600; line-height:1.1;">${title}</div>
             <div style="font-size:0.85rem; font-weight:800; color:${color}; display:flex; justify-content:center; align-items:baseline; gap:4px; margin-top:2px;">
                 ${displayVal}
@@ -4070,12 +4074,12 @@ function checkFavoriteStatus() {
     if (!btn) return;
 
     if (AppState.favorites.includes(fId)) {
-        btn.innerText = 'â­';
+        btn.innerText = '⭐';
         btn.style.background = 'gold';
         btn.style.color = 'white';
         btn.style.borderColor = 'gold';
     } else {
-        btn.innerText = 'â˜†';
+        btn.innerText = '☆';
         btn.style.background = 'transparent';
         btn.style.color = 'var(--primary)';
         btn.style.borderColor = 'var(--primary)';
@@ -4137,7 +4141,7 @@ function updateFormulaSelect(filter = "") {
             sortedFormulas.filter(i => i.cat === cat).forEach(item => {
                 const opt = document.createElement('option');
                 opt.value = item.id;
-                const star = AppState.favorites.includes(item.id) ? 'â­ ' : '';
+                const star = AppState.favorites.includes(item.id) ? '⭐ ' : '';
                 opt.innerText = star + item.name;
                 group.appendChild(opt);
             });
@@ -4779,7 +4783,7 @@ function runSimulation() {
             proTracker.innerHTML = `
                 <div style="margin-top:10px; margin-bottom:10px; background:${ptColor}10; border:2px dashed ${ptColor}; padding:10px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;">
                     <div style="font-weight:700; color:${ptColor}; font-size:1rem;">
-                        ðŸ©¸ Proteína Diaria: <span style="font-size:1.2rem; font-weight:800;">${pt.toFixed(2)}</span> <span style="font-size:0.8rem;">g/kg/d</span>
+                        🩸 Proteína Diaria: <span style="font-size:1.2rem; font-weight:800;">${pt.toFixed(2)}</span> <span style="font-size:0.8rem;">g/kg/d</span>
                     </div>
                     <div style="background:${ptColor}; color:#fff; font-size:0.7rem; padding:4px 8px; border-radius:6px; font-weight:800;">
                         ${ptL}
@@ -4805,13 +4809,13 @@ function runSimulation() {
         const getNPCDiagnosis = (ratio, isPed) => {
             if (isPed) {
                 if (ratio < 90) return '⚠️ ¡Demasiada Proteína! (Riesgo Renal)';
-                if (ratio <= 150) return 'âœ… ¡Perfecto para Crecimiento Rápido!';
-                if (ratio <= 200) return 'ðŸ’¡ Mantenimiento (Sube prote si quieres anabolismo)';
+                if (ratio <= 150) return '✅ ¡Perfecto para Crecimiento Rápido!';
+                if (ratio <= 200) return '💡 Mantenimiento (Sube prote si quieres anabolismo)';
                 return '⚠️ ¡Faltan Proteínas urgentemente! (Riesgo Nutricional)';
             } else {
-                if (ratio < 100) return 'âœ… Fórmula apta para Estrés Severo (UCI)';
-                if (ratio <= 130) return 'âœ… Fórmula apta para Estrés Moderado';
-                if (ratio <= 180) return 'âœ… Mantenimiento (Normal)';
+                if (ratio < 100) return '✅ Fórmula apta para Estrés Severo (UCI)';
+                if (ratio <= 130) return '✅ Fórmula apta para Estrés Moderado';
+                if (ratio <= 180) return '✅ Mantenimiento (Normal)';
                 return '⚠️ ¡Falta Proteína! (Exceso de Energía / Lipogénesis)';
             }
         };
@@ -5043,9 +5047,9 @@ function initInfusionLogic() {
             const fallbackName = rthObj ? rthObj.name : "Fórmula (" + bottleVol + "ml)";
             logBox.style.display = 'block';
             logBox.innerHTML = `
-                <div style="font-size:0.8rem; margin-bottom:4px; color:#555;">ðŸ“Š Pauta 24hrs: <b>${calcTotalVol} ml</b> ${cycleStr}</div>
+                <div style="font-size:0.8rem; margin-bottom:4px; color:#555;">📊 Pauta 24hrs: <b>${calcTotalVol} ml</b> ${cycleStr}</div>
                 <div style="border-top:1px dashed #f1c40f; margin:5px 0;"></div>
-                ðŸ“¦ Necesitas <b>${envasesNedded} producto(s) RTH diarios</b> de ${fallbackName}.<br>
+                📦 Necesitas <b>${envasesNedded} producto(s) RTH diarios</b> de ${fallbackName}.<br>
                 ${planesText}
                 ${currentSachetWarningStr}
                 ${rate > limit ? `<div style="margin-top:6px; color:#e74c3c; font-weight:700; background:rgba(231,76,60,0.1); padding:5px; border-radius:4px; border:1px solid rgba(231,76,60,0.3);">⚠️ Alerta Velocidad: Estás superando el límite clínico sugerido (${limit} ml/hr) para esta población.</div>` : ''}
@@ -5483,7 +5487,7 @@ function attachSearch(inputId, selectId) {
             formulas.forEach(f => {
                 const opt = document.createElement('option');
                 opt.value = f.id;
-                const star = AppState.favorites.includes(f.id) ? 'â­ ' : '';
+                const star = AppState.favorites.includes(f.id) ? '⭐ ' : '';
                 opt.innerText = star + f.name;
                 grp.appendChild(opt);
             });
@@ -5552,7 +5556,7 @@ function initChartSim() {
     if (!ctx) return;
 
     if (typeof Chart === 'undefined') {
-        console.warn("ðŸ“Š Chart.js not loaded yet or blocked. Skipping chart init.");
+        console.warn("📊 Chart.js not loaded yet or blocked. Skipping chart init.");
         return;
     }
     AppState.chart = new Chart(ctx, {
@@ -5957,17 +5961,17 @@ function initAssessmentLogic() {
         } else if (adequacy < 85) {
             label = 'Progresión';
             color = '#3498db';
-            icon = 'ðŸ“ˆ';
+            icon = '📈';
             bgColor = 'rgba(52, 152, 219, 0.05)';
         } else if (adequacy <= 115) {
             label = 'Meta Alcanzada';
             color = '#27ae60';
-            icon = 'âœ…';
+            icon = '✅';
             bgColor = 'rgba(39, 174, 96, 0.05)';
         } else {
             label = 'Sobrealimentación / Superávit';
             color = '#e74c3c';
-            icon = 'ðŸ”¥';
+            icon = '🔥';
             bgColor = 'rgba(231, 76, 60, 0.05)';
         }
 
@@ -6534,7 +6538,15 @@ function initGlobalEvents() {
         const pesoFisico = p.peso || 0;
         const pesoCalc = document.getElementById('pesoCalculoSelect')?.value === 'real' ? pesoFisico : (p.peso_calculo || pesoFisico);
 
-        const cm = (document.getElementById('tallaCM')?.value || (p.estatura * 100)) || 0;
+        let estaturaM = p.estatura || 0;
+        if (!estaturaM) {
+            const rawEst = document.getElementById('estatura')?.value;
+            if (rawEst) {
+                const parsed = parseFloat(rawEst.replace(',', '.'));
+                if (parsed > 0) estaturaM = parsed > 3 ? parsed / 100 : parsed;
+            }
+        }
+        const cm = estaturaM > 0 ? (estaturaM * 100).toFixed(1) : (parseFloat(document.getElementById('tallaCM')?.value) || (p.estatura ? (p.estatura * 100).toFixed(1) : 0));
         const sctVal = document.getElementById('valSCT')?.innerText || '-- m²';
 
         const isBotellin = formula && formula.isBotellin;
@@ -6565,8 +6577,8 @@ function initGlobalEvents() {
         
         const dxMedico = document.getElementById('diagnostico')?.value || p.diagnostico || 'Sin diagnóstico médico';
         
-        const imcNum = p.bmi || (pesoFisico > 0 && p.estatura > 0 ? (pesoFisico / (p.estatura * p.estatura)) : 0);
-        const imcValText = imcNum > 0 ? `${imcNum.toFixed(1)}` : '--';
+        const imcNum = p.bmi || (pesoFisico > 0 && (typeof estaturaM !== 'undefined' ? estaturaM : p.estatura) > 0 ? (pesoFisico / Math.pow(typeof estaturaM !== 'undefined' ? estaturaM : p.estatura, 2)) : 0);
+        const imcValText = imcNum > 0 ? `${imcNum.toFixed(1)}` : (document.getElementById('valAdultIMC')?.innerText?.replace(' kg/m²', '') || document.getElementById('valBMI')?.innerText || '--');
         const tallaVal = cm > 0 ? `${cm} cm` : '--';
         const pesoVal = pesoFisico > 0 ? `${pesoFisico} kg` : '--';
         const cbVal = document.getElementById('cbraquial')?.value || '--';
@@ -6891,14 +6903,53 @@ Hospital Regional de Antofagasta`;
 
         const pesoFisico = p.peso || 0;
         const pesoCalc = document.getElementById('pesoCalculoSelect')?.value === 'real' ? pesoFisico : (p.peso_calculo || pesoFisico);
-        const cm = (document.getElementById('tallaCM')?.value || (p.estatura * 100)) || 0;
-        const tallaMt = (cm / 100).toFixed(3);
+        let estM = p.estatura || 0;
+        if (!estM) {
+            const rawEst = document.getElementById('estatura')?.value;
+            if (rawEst) {
+                const parsed = parseFloat(rawEst.replace(',', '.'));
+                if (parsed > 0) estM = parsed > 3 ? parsed / 100 : parsed;
+            }
+        }
+        const cm = estM > 0 ? (estM * 100).toFixed(1) : (parseFloat(document.getElementById('tallaCM')?.value) || (p.estatura ? (p.estatura * 100).toFixed(1) : 0));
+        const tallaMt = estM > 0 ? estM.toFixed(2) : (cm > 0 ? (parseFloat(cm) / 100).toFixed(2) : '--');
         const cCintura = document.getElementById('ccintura')?.value || '--';
         const cBraquialVal = document.getElementById('cbraquial')?.value || '[Completar]';
 
-        const imcVal = document.getElementById('valIMC')?.innerText || '--';
-        const zImcVal = document.getElementById('valZBMI')?.innerText || '--';
-        const zTallaVal = document.getElementById('valZHFA')?.innerText || '--';
+        let calculatedBmi = p.bmi || 0;
+        if (!calculatedBmi && pesoFisico > 0 && estM > 0) {
+            calculatedBmi = pesoFisico / (estM * estM);
+        }
+        const domBmi = document.getElementById('valAdultIMC')?.innerText?.replace(' kg/m²', '') || document.getElementById('valBMI')?.innerText || document.getElementById('valIMC')?.innerText;
+        const imcVal = calculatedBmi > 0 ? calculatedBmi.toFixed(1) : (domBmi && domBmi !== '--' ? domBmi : '--');
+
+        let zImcDisplay = '--';
+        let zTallaDisplay = '--';
+        if (p.type === 'pediatric' || p.type === 'neonate') {
+            const m = p.exactMonths || 0;
+            const currentCm = parseFloat(cm) || (estM * 100);
+            if (p.zScores?.bmi !== undefined && !isNaN(p.zScores.bmi)) {
+                zImcDisplay = `${p.zScores.bmi > 0 ? '+' : ''}${p.zScores.bmi.toFixed(2)}`;
+            } else if (typeof getZScore === 'function' && m > 0) {
+                const z = m > 60 ? getZScore('bmi', m, p.sexo, calculatedBmi) : getZScore('wfh', currentCm, p.sexo, pesoFisico);
+                if (z !== null && !isNaN(z)) zImcDisplay = `${z > 0 ? '+' : ''}${z.toFixed(2)}`;
+            }
+            if (p.zScores?.hfa !== undefined && !isNaN(p.zScores.hfa)) {
+                zTallaDisplay = `${p.zScores.hfa > 0 ? '+' : ''}${p.zScores.hfa.toFixed(2)}`;
+            } else if (typeof getZScore === 'function' && m > 0 && currentCm > 0) {
+                const z = getZScore('hfa', m, p.sexo, currentCm);
+                if (z !== null && !isNaN(z)) zTallaDisplay = `${z > 0 ? '+' : ''}${z.toFixed(2)}`;
+            }
+        }
+        const zImcVal = (document.getElementById('valZBMI')?.innerText && document.getElementById('valZBMI')?.innerText !== '--') ? document.getElementById('valZBMI').innerText : zImcDisplay;
+        const zTallaVal = (document.getElementById('valZHFA')?.innerText && document.getElementById('valZHFA')?.innerText !== '--') ? document.getElementById('valZHFA').innerText : zTallaDisplay;
+
+
+
+
+
+
+
 
         const des = document.getElementById('diagnosticoPES')?.value || "Sin diagnóstico ingresado";
 
@@ -7028,11 +7079,11 @@ Hospital Regional de Antofagasta`;
         let indicadoresText = "";
         let tamizajeText = "";
         let clasifIMC = "Normal / Eutrófico";
-        let imcNum = parseFloat(imcVal) || (pesoFisico > 0 && cm > 0 ? (pesoFisico / Math.pow(cm / 100, 2)) : 0);
+        let imcNum = parseFloat(imcVal) || (typeof calculatedBmi !== 'undefined' ? calculatedBmi : 0) || (pesoFisico > 0 && cm > 0 ? (pesoFisico / Math.pow(parseFloat(cm) / 100, 2)) : 0);
 
         if (pMode === 'pediatric') {
-            const zImcVal = document.getElementById('valZBMI')?.innerText || '--';
-            const zTallaVal = document.getElementById('valZHFA')?.innerText || '--';
+
+
             const waistStatus = document.getElementById('valWaistClass')?.innerText || 'No evaluada';
 
             indicadoresText = `Indicadores nutricionales: (OMS / WHO Anthro Pediátrico)
@@ -7836,7 +7887,7 @@ function addExamRow() {
         <input type="date">
         <input type="text" placeholder="Examen (Ej: Albúmina)">
         <input type="text" placeholder="Resultado">
-        <button class="btn-row-del" onclick="this.parentElement.remove()" title="Eliminar examen">ðŸ—‘ï¸</button>
+        <button class="btn-row-del" onclick="this.parentElement.remove()" title="Eliminar examen">🗑️</button>
     `;
     container.appendChild(row);
 }
@@ -7954,7 +8005,8 @@ function constructNutriIAPrompt() {
             return { fecha: inputs[0]?.value, examen: inputs[1]?.value, valor: inputs[2]?.value };
         }).filter(e => e.examen),
         riesgo: {
-            nrs2002: document.getElementById('nrs2002')?.value,
+            nrs2002: AppState.patient?.nrs2002 ? `${AppState.patient.nrs2002.score || 0} pts (${AppState.patient.nrs2002.classification || ''})` : (document.getElementById('nrsTotalScore')?.innerText ? `${document.getElementById('nrsTotalScore').innerText} pts (${document.getElementById('nrsClassif')?.innerText || ''})` : document.getElementById('nrs2002')?.value || "No evaluado"),
+            strongkids: AppState.patient?.strongkids ? `${AppState.patient.strongkids.score || 0} pts (${AppState.patient.strongkids.classification || ''})` : "No evaluado",
             vgs: document.getElementById('vgs')?.value
         },
         tolerancia: {
@@ -8221,7 +8273,7 @@ function initGoalMacroChart() {
             if (input) {
                 input.value = value;
                 input.dispatchEvent(new Event('input'));
-                showToast(`ðŸŽ¯ Proteína fijada en ${value} g/kg`);
+                showToast(`🎯 Proteína fijada en ${value} g/kg`);
             }
         }
     };
@@ -9554,6 +9606,10 @@ async function showCensusReviewModal(extracted, bedsList, activeLoc) {
     
     const matchedPatients = activePatients.filter(p => {
         if (p.metadata && p.metadata.location && p.metadata.location.serviceId) {
+            const locFloor = p.metadata.location.floor;
+            if (locFloor && activeLoc.floor && String(locFloor) !== String(activeLoc.floor)) {
+                return false;
+            }
             return p.metadata.location.serviceId === activeLoc.serviceId;
         }
         return bedsList.includes(p.cama);
@@ -10731,6 +10787,10 @@ window.dischargeAllFloatingPatients = async function(skipConfirm = false) {
         const cleanPBed = p.cama ? p.cama.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() : '';
         const isBedInService = bedsList.some(b => b.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === cleanPBed || b === p.cama);
         if (p.metadata && p.metadata.location && p.metadata.location.serviceId) {
+            const locFloor = p.metadata.location.floor;
+            if (locFloor && activeLoc.floor && String(locFloor) !== String(activeLoc.floor)) {
+                return isBedInService;
+            }
             return p.metadata.location.serviceId === activeLoc.serviceId || isBedInService;
         }
         return isBedInService;
@@ -11150,6 +11210,10 @@ window.renderWardBedsGrid = async function(silent = false) {
             const isBedInService = bedsList.some(b => b.replace(/[^a-zA-Z0-9]/g, '').toUpperCase() === cleanPBed || b === p.cama);
 
             if (p.metadata && p.metadata.location && p.metadata.location.serviceId) {
+                const locFloor = p.metadata.location.floor;
+                if (locFloor && activeLoc.floor && String(locFloor) !== String(activeLoc.floor)) {
+                    return false;
+                }
                 return p.metadata.location.serviceId === activeLoc.serviceId;
             }
             return isBedInService;
