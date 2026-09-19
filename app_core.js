@@ -11376,8 +11376,8 @@ window.renderWardBedsGrid = async function(silent = false) {
                         
                         const numFicha = patient.metadata?.num_ficha || '';
                         
-                        // Parse history entries for Observaciones Generales
-                        const allHistoryForName = activePatients.filter(ap => ap.nombre === patient.nombre && ap.user_id === AppState.user.id);
+                        // Parse history entries for Observaciones Generales (Colaborativo entre colegas)
+                        const allHistoryForName = activePatients.filter(ap => ap.nombre === patient.nombre);
                         allHistoryForName.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                         
                         const obsEntries = [];
