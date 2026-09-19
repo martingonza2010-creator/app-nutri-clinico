@@ -2493,6 +2493,13 @@ window.loadPatient = async (id) => {
                     document.getElementById('btnModeGkg')?.click();
                 }
             }
+            if (sim.goal_total) {
+                const gtEl = document.getElementById('goalTotal');
+                if (gtEl) gtEl.value = sim.goal_total;
+            } else if (data.tmt) {
+                const gtEl = document.getElementById('goalTotal');
+                if (gtEl) gtEl.value = data.tmt;
+            }
             if (sim.goal_prot) document.getElementById('goalProtKg').value = sim.goal_prot;
             if (sim.goal_cho) document.getElementById('goalCHOKg').value = sim.goal_cho;
             if (sim.goal_lip) document.getElementById('goalLipKg').value = sim.goal_lip;
@@ -4670,6 +4677,123 @@ window.generateDietoterapiaString = (kcalFinal, protFinal, pesoCalc) => {
     return result;
 };
 
+window.getEffectiveNutritionalGoal = () => {
+    const p = AppState.patient || {};
+    const pesoFisico = p.peso || parseFloat(document.getElementById('peso')?.value) || 0;
+    const pesoCalc = document.getElementById('pesoCalculoSelect')?.value === 'real' ? pesoFisico : (p.peso_calculo || pesoFisico);
+
+    // 1. Direct goalTotal input
+    const inpGoal = parseFloat(document.getElementById('goalTotal')?.value);
+    if (!isNaN(inpGoal) && inpGoal > 0) return inpGoal;
+
+    // 2. Kcal/kg Box * peso
+    const kcalBox = parseFloat(document.getElementById('goalKcalBox')?.value);
+    if (!isNaN(kcalBox) && kcalBox > 0 && pesoCalc > 0) return Math.round(kcalBox * pesoCalc);
+
+    // 3. Official GET displayed in UI
+    const valGetEl = document.getElementById('valGET');
+    if (valGetEl && valGetEl.innerText) {
+        const parsed = parseFloat(valGetEl.innerText.replace(/[^0-9.]/g, ''));
+        if (!isNaN(parsed) && parsed > 0) return Math.round(parsed);
+    }
+
+    // 4. Patient state stored values
+    if (p.tmt && p.tmt > 0) return Math.round(p.tmt);
+    if (p.tmt_calculated && p.tmt_calculated > 0) return Math.round(p.tmt_calculated);
+    if (p.factorial_calculated && p.factorial_calculated > 0) return Math.round(p.factorial_calculated);
+
+    // 5. resFactorial or resTMB
+    const resFactEl = document.getElementById('resFactorial');
+    if (resFactEl && resFactEl.innerText) {
+        const parsed = parseFloat(resFactEl.innerText.replace(/[^0-9.]/g, ''));
+        if (!isNaN(parsed) && parsed > 0) return Math.round(parsed);
+    }
+    const resTmbEl = document.getElementById('resTMB');
+    if (resTmbEl && resTmbEl.innerText) {
+        const parsed = parseFloat(resTmbEl.innerText.replace(/[^0-9.]/g, ''));
+        if (!isNaN(parsed) && parsed > 0) return Math.round(parsed);
+    }
+
+    // 6. Factor Kcal input * peso
+    const factorKcal = parseFloat(document.getElementById('factorKcal')?.value);
+    if (!isNaN(factorKcal) && factorKcal > 0 && pesoCalc > 0) return Math.round(factorKcal * pesoCalc);
+
+    return 0;
+};
+
+window.getEffectiveMacroRequirements = () => {
+    if (typeof updateMacroGoals === 'function') {
+        try { updateMacroGoals(); } catch(e) {}
+    }
+
+    const p = AppState.patient || {};
+    const pesoFisico = p.peso || parseFloat(document.getElementById('peso')?.value) || 0;
+    const pesoCalc = document.getElementById('pesoCalculoSelect')?.value === 'real' ? pesoFisico : (p.peso_calculo || pesoFisico);
+
+    const goal = window.getEffectiveNutritionalGoal ? window.getEffectiveNutritionalGoal() : (parseFloat(document.getElementById('goalTotal')?.value) || 0);
+
+    const valP = parseFloat(document.getElementById('goalProtKg')?.value) || 0;
+    const valC = parseFloat(document.getElementById('goalCHOKg')?.value) || 0;
+    const valL = parseFloat(document.getElementById('goalLipKg')?.value) || 0;
+
+    let pTotal = parseFloat(document.getElementById('goalProt')?.dataset.val) || 0;
+    let cTotal = parseFloat(document.getElementById('goalCHO')?.dataset.val) || 0;
+    let lTotal = parseFloat(document.getElementById('goalLip')?.dataset.val) || 0;
+
+    let pPct = 0;
+    let cPct = 0;
+    let lPct = 0;
+
+    const isPctMode = typeof macroGoalMode !== 'undefined' && macroGoalMode === 'pct';
+
+    if (isPctMode) {
+        pPct = valP;
+        cPct = valC;
+        lPct = valL;
+
+        if (pTotal === 0 && goal > 0 && pPct > 0) {
+            pTotal = (goal * (pPct / 100)) / 4;
+        }
+        if (cTotal === 0 && goal > 0 && cPct > 0) {
+            cTotal = (goal * (cPct / 100)) / 4;
+        }
+        if (lTotal === 0 && goal > 0 && lPct > 0) {
+            lTotal = (goal * (lPct / 100)) / 9;
+        }
+    } else {
+        if (pTotal === 0 && valP > 0 && pesoCalc > 0) {
+            pTotal = valP * pesoCalc;
+        }
+        if (cTotal === 0 && valC > 0 && pesoCalc > 0) {
+            cTotal = valC * pesoCalc;
+        }
+        if (lTotal === 0 && valL > 0 && pesoCalc > 0) {
+            lTotal = valL * pesoCalc;
+        }
+
+        if (goal > 0) {
+            pPct = parseFloat(((pTotal * 4) / goal * 100).toFixed(0));
+            cPct = parseFloat(((cTotal * 4) / goal * 100).toFixed(0));
+            lPct = parseFloat(((lTotal * 9) / goal * 100).toFixed(0));
+        }
+    }
+
+    const factorKcalVal = parseFloat(document.getElementById('factorKcal')?.value) || (pesoCalc > 0 && goal > 0 ? (goal / pesoCalc).toFixed(0) : 0);
+    const factorProtVal = (!isPctMode && valP > 0) ? valP.toFixed(1) : (pesoCalc > 0 && pTotal > 0 ? (pTotal / pesoCalc).toFixed(1) : 0);
+
+    return {
+        goal: Math.round(goal),
+        pTotal,
+        cTotal,
+        lTotal,
+        pPct: Math.round(pPct),
+        cPct: Math.round(cPct),
+        lPct: Math.round(lPct),
+        factorKcalVal,
+        factorProtVal
+    };
+};
+
 function updateOralIntakePreset() {
     const dietSelect = document.getElementById('oralDietType');
     if (!dietSelect) return;
@@ -6811,11 +6935,17 @@ function initGlobalEvents() {
         const fId = document.getElementById('formulaSelect')?.value;
         const formula = AppState.formulas ? AppState.formulas.find(f => f.id === fId) : null;
         const vol = window.getEffectiveSimulationVolume ? window.getEffectiveSimulationVolume() : 0;
-        const goal = parseFloat(document.getElementById('goalTotal')?.value) || 0;
-
-        let pTotal = parseFloat(document.getElementById('goalProt')?.dataset.val) || 0;
-        let cTotal = parseFloat(document.getElementById('goalCHO')?.dataset.val) || 0;
-        let lTotal = parseFloat(document.getElementById('goalLip')?.dataset.val) || 0;
+        const reqsVI = window.getEffectiveMacroRequirements ? window.getEffectiveMacroRequirements() : {
+            goal: parseFloat(document.getElementById('goalTotal')?.value) || 0,
+            pTotal: parseFloat(document.getElementById('goalProt')?.dataset.val) || 0,
+            cTotal: parseFloat(document.getElementById('goalCHO')?.dataset.val) || 0,
+            lTotal: parseFloat(document.getElementById('goalLip')?.dataset.val) || 0,
+            factorKcalVal: 0, factorProtVal: 0
+        };
+        const goal = reqsVI.goal;
+        let pTotal = reqsVI.pTotal;
+        let cTotal = reqsVI.cTotal;
+        let lTotal = reqsVI.lTotal;
 
         let modulesText = "";
         const mods = ["Nessucar", "MCT", "Enterex", "Banatrol", "Proteinex", "Fresubin"];
@@ -7221,14 +7351,22 @@ Hospital Regional de Antofagasta`;
 
         const des = document.getElementById('diagnosticoPES')?.value || "Sin diagnóstico ingresado";
 
-        const goal = parseFloat(document.getElementById('goalTotal')?.value) || 0;
-        const pTotal = parseFloat(document.getElementById('goalProt')?.dataset.val) || 0;
-        const cTotal = parseFloat(document.getElementById('goalCHO')?.dataset.val) || 0;
-        const lTotal = parseFloat(document.getElementById('goalLip')?.dataset.val) || 0;
+        const reqs = window.getEffectiveMacroRequirements ? window.getEffectiveMacroRequirements() : {
+            goal: parseFloat(document.getElementById('goalTotal')?.value) || 0,
+            pTotal: parseFloat(document.getElementById('goalProt')?.dataset.val) || 0,
+            cTotal: parseFloat(document.getElementById('goalCHO')?.dataset.val) || 0,
+            lTotal: parseFloat(document.getElementById('goalLip')?.dataset.val) || 0,
+            pPct: 0, cPct: 0, lPct: 0,
+            factorKcalVal: 0, factorProtVal: 0
+        };
 
-        const pPct = goal > 0 ? ((pTotal * 4) / goal * 100).toFixed(0) : 0;
-        const cPct = goal > 0 ? ((cTotal * 4) / goal * 100).toFixed(0) : 0;
-        const lPct = goal > 0 ? ((lTotal * 9) / goal * 100).toFixed(0) : 0;
+        const goal = reqs.goal;
+        const pTotal = reqs.pTotal;
+        const cTotal = reqs.cTotal;
+        const lTotal = reqs.lTotal;
+        const pPct = reqs.pPct;
+        const cPct = reqs.cPct;
+        const lPct = reqs.lPct;
 
         const userName = AppState.user?.user_metadata?.full_name || "[Nombre del Profesional]";
 
@@ -7417,8 +7555,8 @@ o Interpretación: ${(nrs.classification || 'Sin riesgo nutricional').toUpperCas
         }
 
         // Factors calculation for Requirements
-        const factorKcalVal = parseFloat(document.getElementById('factorKcal')?.value) || (pesoCalc > 0 ? (goal / pesoCalc).toFixed(0) : 0);
-        const factorProtVal = parseFloat(document.getElementById('goalProtKg')?.value) || (pesoCalc > 0 ? (pTotal / pesoCalc).toFixed(1) : 0);
+        const factorKcalVal = reqs.factorKcalVal || (pesoCalc > 0 && goal > 0 ? (goal / pesoCalc).toFixed(0) : 0);
+        const factorProtVal = reqs.factorProtVal || (pesoCalc > 0 && pTotal > 0 ? (pTotal / pesoCalc).toFixed(1) : 0);
 
         // Aporte
         const curKcal = document.getElementById('valKcal')?.innerText || '0';
