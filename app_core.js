@@ -141,6 +141,8 @@ const LOCAL_FORMULAS = [
     { cat: "Fórmulas en Polvo", id: "prenan", name: "Prenan", type: "p", k: 507, p: 12.5, c: 54.5, f: 26.6, lipids_profile: { dha: 90, ara: 90, cholesterol: 0 }, minerals: { na: 250, k: 570, cl: 335, ca: 558, p: 320, mg: 59, mn: 0.085, se: 0.015, fe: 5.1, i: 0.11, cu: 0.39, zn: 5.7 } },
     { cat: "Fórmulas en Polvo", id: "nan_sin_lactosa", name: "NAN Sin Lactosa", type: "p", k: 506, p: 10.4, c: 58.5, f: 25.6, lipids_profile: { dha: 42, ara: 42, cholesterol: 30 }, minerals: { na: 160, k: 480, cl: 340, ca: 280, p: 160, mg: 43, mn: 0.07, se: 0.009, fe: 5.0, i: 0.062, cu: 0.34, zn: 2.8 } },
     { cat: "Fórmulas en Polvo", id: "fortificador_leche_materna", name: "Fortificador Leche Materna", type: "p", k: 435, p: 35.5, c: 32.4, f: 4.2, lipids_profile: { dha: 157, ara: 0, cholesterol: 0 }, minerals: { na: 918, k: 1210, cl: 803, ca: 1890, p: 1095, mg: 100, mn: 0.185, se: 0.085, fe: 45.0, i: 0.39, cu: 1.3, zn: 23.5 } },
+    { cat: "Fórmulas en Polvo", id: "blemil_plus_hidrolizado", name: "Blemil Plus Hidrolizado", type: "p", stdDil: 13.5, k: 502, p: 12.0, c: 54.5, f: 25.5, fibra: 3.0, hmb: 0, lipids_profile: { dha: 120, ara: 0 }, minerals: { na: 225, k: 500, cl: 420, ca: 550, p: 360, mg: 45, mn: 0.15, se: 0.02, fe: 5.0, i: 0.10, cu: 0.37, zn: 5.0, cr: 0.02, mo: 0.03 } },
+    { cat: "Fórmulas en Polvo", id: "blemil_plus_elemental", name: "Blemil Plus Elemental", type: "p", stdDil: 13.5, k: 498, p: 13.0, c: 53.0, f: 26.0, fibra: 0, hmb: 0, lipids_profile: { dha: 120, ara: 0 }, minerals: { na: 250, k: 550, cl: 490, ca: 620, p: 400, mg: 50, mn: 0.10, se: 0.025, fe: 5.0, i: 0.10, cu: 0.37, zn: 4.0, cr: 0.02, mo: 0.03 } },
     
     // --- FÓRMULAS EN POLVO (LECHES HRA) ---
     { cat: "Leches HRA", id: "lacsure", name: "Lacsure", type: "p", stdDil: 25, allowedDilutions: [25, 28], k: 378, p: 14.7, c: 68.8, f: 3.24, lipids_profile: { dha: 0, ara: 0 }, minerals: { na: 146, k: 1377, cl: 0, ca: 478, p: 221, mg: 128, mn: 1.28, se: 0.015, fe: 3.3, i: 0.0595, cu: 0.25, zn: 3.5, cr: 0.0213, mo: 0 }, fibra: 3.4, hmb: 785 },
@@ -879,7 +881,7 @@ function initHistoryModal() {
     const btnClose = document.getElementById('btnHistoryClose');
     if (btnOpen) btnOpen.onclick = () => {
         modal.classList.add('active');
-        window.loadHistoryList(false);
+        window.loadHistoryList(true);
     };
     if (btnClose) btnClose.onclick = () => modal.classList.remove('active');
 
@@ -1070,7 +1072,13 @@ function initCompactLayout() {
                     weight_history: AppState.patient.weight_history || [],
                     location: activeLocStr ? JSON.parse(activeLocStr) : null,
                     num_ficha: document.getElementById('num_ficha')?.value || '',
-                    antecedentes_morbidos: document.getElementById('antecedentes_morbidos')?.value || '',
+                    antecedentes_morbidos: (() => {
+                        const parts = [];
+                        if (document.getElementById('patologia_dm')?.checked) parts.push('DM');
+                        if (document.getElementById('patologia_hta')?.checked) parts.push('HTA');
+                        if (document.getElementById('patologia_erc')?.checked) parts.push('ERC');
+                        return parts.join(', ');
+                    })(),
                     riesgo_lpp: document.getElementById('riesgo_lpp')?.value || 'Sin evaluar',
                     patologia_dm: document.getElementById('patologia_dm')?.checked || false,
                     patologia_hta: document.getElementById('patologia_hta')?.checked || false,
@@ -1259,12 +1267,12 @@ function initGoalLogic() {
     // Redundant block merged into initAssessmentLogic
 }
 
-window.loadHistoryList = async (showPapelera = false) => {
+window.loadHistoryList = async (showPapelera = true) => {
     if (!AppState.user || !AppState.user.id) {
         console.warn("loadHistoryList: AppState.user is not loaded yet. Skipping load.");
         const list = document.getElementById('patientListContainer');
         if (list) {
-            list.innerHTML = '<p style="text-align:center; opacity:0.6;">Cargando tus registros...</p>';
+            list.innerHTML = '<p style="text-align:center; opacity:0.6;">Cargando papelera...</p>';
         }
         return;
     }
@@ -1283,12 +1291,11 @@ window.loadHistoryList = async (showPapelera = false) => {
     const list = document.getElementById('patientListContainer');
     if (!list) return;
 
-    list.innerHTML = '<p style="text-align:center;">Cargando historial...</p>';
+    list.innerHTML = '<p style="text-align:center;">Cargando papelera...</p>';
 
     const { data: records, error } = await supabaseClient
         .from('pacientes')
         .select('*, metadata')
-        .eq('user_id', AppState.user.id)
         .order('created_at', { ascending: false });
 
     if (error) {
@@ -1299,7 +1306,7 @@ window.loadHistoryList = async (showPapelera = false) => {
     }
 
     if (!records || records.length === 0) {
-        list.innerHTML = '<p style="text-align:center; opacity:0.6;">Ningún registro guardado aún.</p>';
+        list.innerHTML = '<p style="text-align:center; opacity:0.6;">La papelera está vacía.</p>';
         return;
     }
 
@@ -1320,9 +1327,9 @@ window.loadHistoryList = async (showPapelera = false) => {
     const showRecords = [];
 
     validRecords.forEach(r => {
-        const isTrash = r.estado_sala === 'eliminado';
+        const isTrash = r.estado_sala === 'eliminado' || r.estado_sala === 'de_alta';
         if (isTrash) {
-            const delDateStr = r.metadata?.deleted_at;
+            const delDateStr = r.metadata?.deleted_at || r.metadata?.discharged_at;
             let daysLeft = 30;
             if (delDateStr) {
                 const diffTime = Math.abs(now - new Date(delDateStr));
@@ -1341,7 +1348,7 @@ window.loadHistoryList = async (showPapelera = false) => {
                 r._daysLeft = daysLeft;
                 showRecords.push(r);
             }
-        } else if (!showPapelera && r.estado_sala !== 'eliminado') {
+        } else if (!showPapelera && r.estado_sala !== 'eliminado' && r.estado_sala !== 'de_alta') {
             showRecords.push(r);
         }
     });
@@ -1396,6 +1403,7 @@ window.reactivateDischargedPatient = async function(id) {
     const { data: p } = await supabaseClient.from('pacientes').select('metadata').eq('id', id).single();
     const updatedMeta = { ...(p?.metadata || {}), service_admitted_at: new Date().toISOString() };
     delete updatedMeta.discharged_at;
+    delete updatedMeta.deleted_at;
 
     const { error } = await supabaseClient
         .from('pacientes')
@@ -1404,7 +1412,7 @@ window.reactivateDischargedPatient = async function(id) {
 
     if (!error) {
         showToast("↩ Paciente reingresado a la sala activa.");
-        if (typeof window.loadHistoryList === 'function') await window.loadHistoryList(false);
+        if (typeof window.loadHistoryList === 'function') await window.loadHistoryList(true);
         await window.renderWardBedsGrid();
     } else {
         alert("Error al reingresar paciente: " + error.message);
@@ -1424,131 +1432,32 @@ window.renderFilteredHistory = () => {
     }
 
     if (filtered.length === 0) {
-        list.innerHTML = '<p style="text-align:center; opacity:0.6; padding:20px;">No se encontraron casos guardados para el filtro seleccionado.</p>';
+        list.innerHTML = '<p style="text-align:center; opacity:0.6; padding:20px;">La papelera está vacía. No hay pacientes en espera de eliminación.</p>';
         return;
     }
 
-    // Check if we are showing Trash items
-    const isShowingTrash = filtered.some(r => r.estado_sala === 'eliminado');
-    if (isShowingTrash) {
-        let trashHtml = '';
-        filtered.forEach(r => {
-            const dateObj = new Date(r.created_at);
-            const dateStr = dateObj.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
-            trashHtml += `
-                <div class="history-card trash" style="background:#fffaf8; border:1px solid #fed7aa; border-radius:12px; padding:12px 16px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-                    <div style="display:flex; flex-direction:column; gap:4px; flex:1;">
-                        <strong style="color:#7c2d12; font-size:0.95rem;">${r.nombre} (Ficha: ${r.metadata?.num_ficha || '--'})</strong>
-                        <span style="font-size:0.75rem; color:#9a3412;">⚠️ Se eliminará definitivamente en <b>${r._daysLeft} días</b> | Creado: ${dateStr}</span>
-                    </div>
-                    <div style="display:flex; gap:6px; align-items:center;">
-                        <button class="btn-primary" style="padding: 4px 10px; font-size: 0.75rem; background:#10b981; border:none; color:white; border-radius:6px;" onclick="window.restorePatient('${r.id}')">↩ Restaurar</button>
-                        <button class="btn-micro" style="padding: 6px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.08); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 6px;" onclick="event.stopPropagation(); window.hardDeletePatient('${r.id}')" title="Eliminar definitivamente">🗑</button>
-                    </div>
-                </div>
-            `;
-        });
-        list.innerHTML = trashHtml;
-        return;
-    }
-
-    // Grouping by Month for CASOS
-    const groups = {};
+    let trashHtml = '';
     filtered.forEach(r => {
-        const dateRef = r.metadata?.discharged_at || r.created_at;
-        const d = new Date(dateRef);
-        const year = d.getFullYear();
-        const monthNum = d.getMonth(); // 0-indexed
-        const monthKey = `${year}-${String(monthNum + 1).padStart(2, '0')}`;
-
-        const monthNames = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
-        const monthLabel = `${monthNames[monthNum]} ${year}`;
-
-        if (!groups[monthKey]) {
-            groups[monthKey] = {
-                label: monthLabel,
-                records: []
-            };
-        }
-        groups[monthKey].records.push(r);
-    });
-
-    // Sort month keys descending (newest month first)
-    const sortedKeys = Object.keys(groups).sort().reverse();
-
-    let accordionHTML = '';
-    sortedKeys.forEach((key, index) => {
-        const group = groups[key];
-        const isFirstMonth = index === 0; // First month expanded by default
-
-        let cardsHtml = '';
-        group.records.forEach(r => {
-            // Stay calculation
-            const firstAdmit = r.metadata?.first_hospital_admitted_at || r.metadata?.fecha_ingreso_servicio || r.created_at;
-            const serviceAdmit = r.metadata?.service_admitted_at || r.metadata?.fecha_ingreso_servicio || r.created_at;
-            const dischargeTime = r.metadata?.discharged_at || new Date().toISOString();
-
-            const daysInHospital = Math.max(1, Math.ceil(Math.abs(new Date(dischargeTime) - new Date(firstAdmit)) / (1000 * 60 * 60 * 24)));
-            const daysInService = Math.max(1, Math.ceil(Math.abs(new Date(dischargeTime) - new Date(serviceAdmit)) / (1000 * 60 * 60 * 24)));
-
-            // Transfer route badge
-            let transferRouteHtml = '';
-            if (Array.isArray(r.metadata?.transfer_history) && r.metadata.transfer_history.length > 0) {
-                const routeNames = r.metadata.transfer_history.map(t => t.name || `Piso ${t.floor}`);
-                if (r.metadata?.location?.name) routeNames.push(r.metadata.location.name);
-                transferRouteHtml = `<span class="case-route-tag" title="Ruta de traslados recorridos">🗺️ ${routeNames.join(' ➔ ')}</span>`;
-            } else if (r.metadata?.location?.name) {
-                transferRouteHtml = `<span class="case-route-tag">📍 ${r.metadata.location.name}</span>`;
-            }
-
-            const isDischarged = r.estado_sala === 'de_alta';
-
-            cardsHtml += `
-                <div class="case-card-compact">
-                    <div class="case-info-main">
-                        <div class="case-patient-title">
-                            <strong class="patient-name" onclick="loadPatient('${r.id}')" title="Ver Ficha">${r.nombre}</strong>
-                            <span class="patient-ficha">Ficha: ${r.metadata?.num_ficha || '--'}</span>
-                            <span class="patient-demo">${r.edad ? r.edad + ' años' : ''} ${r.sexo ? '(' + r.sexo.toUpperCase() + ')' : ''}</span>
-                            ${isDischarged ? '<span class="status-pill discharged">✔️ Dado de Alta</span>' : '<span class="status-pill active">🏥 En Censo</span>'}
-                        </div>
-                        <div class="case-meta-bar">
-                            ${transferRouteHtml}
-                            <span class="stay-badge total" title="Días totales transcurridos hospitalizado">🏥 Total Hosp: <b>${daysInHospital} días</b></span>
-                            <span class="stay-badge service" title="Días transcurridos en esta sala/servicio">🛌 En Sala: <b>${daysInService} días</b></span>
-                        </div>
-                        <div class="case-clinical-snippet">
-                            <span class="diag-text" title="${r.diagnostico || ''}">📋 ${r.diagnostico ? (r.diagnostico.length > 60 ? r.diagnostico.slice(0, 60) + '...' : r.diagnostico) : 'Sin diagnóstico registrado'}</span>
-                            <span class="diet-text">🍲 ${r.metadata?.regimen || 'Régimen s/ind'}</span>
-                        </div>
-                    </div>
-                    <div class="case-actions">
-                        <button class="btn-case-action load" onclick="loadPatient('${r.id}')" title="Ver Ficha">📂 Ficha</button>
-                        <button class="btn-case-action restore" onclick="event.stopPropagation(); window.reactivateDischargedPatient('${r.id}')" title="Reingresar paciente a la sala activa">↩ Reingresar</button>
-                        <button class="btn-case-action trash" onclick="event.stopPropagation(); window.deletePatient('${r.id}')" title="Mover a Papelera">🗑️</button>
-                    </div>
+        const dateObj = new Date(r.metadata?.deleted_at || r.metadata?.discharged_at || r.created_at);
+        const dateStr = dateObj.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        const sName = r.metadata?.location?.serviceName ? ` | ${r.metadata.location.serviceName}` : '';
+        const bedInfo = r.cama ? ` | Cama: ${r.cama}` : '';
+        trashHtml += `
+            <div class="history-card trash" style="background:#fffaf8; border:1px solid #fed7aa; border-radius:12px; padding:12px 16px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+                <div style="display:flex; flex-direction:column; gap:4px; flex:1;">
+                    <strong style="color:#7c2d12; font-size:0.95rem;">${r.nombre} (Ficha: ${r.metadata?.num_ficha || '--'})</strong>
+                    <span style="font-size:0.75rem; color:#9a3412;">⚠️ Se eliminará definitivamente en <b>${r._daysLeft} días</b> | Salida: ${dateStr}${sName}${bedInfo}</span>
                 </div>
-            `;
-        });
-
-        accordionHTML += `
-            <div class="month-accordion" id="accordion-${key}">
-                <div class="month-accordion-header" onclick="window.toggleMonthAccordion('${key}')">
-                    <div style="display:flex; align-items:center; gap:8px;">
-                        <span class="accordion-arrow" id="arrow-${key}">${isFirstMonth ? '▼' : '►'}</span>
-                        <strong style="font-size:1.05rem; color:#312e81;">📅 ${group.label}</strong>
-                    </div>
-                    <span class="month-count-badge">${group.records.length} ${group.records.length === 1 ? 'Caso Clínico' : 'Casos Clínicos'}</span>
-                </div>
-                <div class="month-accordion-content" id="content-${key}" style="display: ${isFirstMonth ? 'flex' : 'none'}; flex-direction: column; gap: 8px; padding-top: 10px;">
-                    ${cardsHtml}
+                <div style="display:flex; gap:6px; align-items:center;">
+                    <button class="btn-primary" style="padding: 5px 12px; font-size: 0.75rem; background:#10b981; border:none; color:white; border-radius:6px; cursor:pointer;" onclick="window.restorePatient('${r.id}')">↩ Restaurar a Sala</button>
+                    <button class="btn-micro" style="padding: 6px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.08); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 6px; cursor:pointer;" onclick="event.stopPropagation(); window.hardDeletePatient('${r.id}')" title="Eliminar definitivamente ahora">🗑</button>
                 </div>
             </div>
         `;
     });
-
-    list.innerHTML = accordionHTML;
+    list.innerHTML = trashHtml;
 };
+
 
 // --- NEW V3.60: WARD KANBAN LOGIC ---
 function initWardKanban() {
@@ -1758,8 +1667,7 @@ window.restorePatient = async (id) => {
             .eq('cama', targetBed)
             .neq('nombre', p.nombre)
             .neq('estado_sala', 'de_alta')
-            .neq('estado_sala', 'eliminado')
-            .eq('user_id', AppState.user.id);
+            .neq('estado_sala', 'eliminado');
             
         if (activeOnBed && activeOnBed.length > 0) {
             const conflictingName = activeOnBed[0].nombre;
@@ -1775,8 +1683,7 @@ window.restorePatient = async (id) => {
             estado_sala: 'activo',
             cama: targetBed
         })
-        .eq('nombre', p.nombre)
-        .eq('user_id', AppState.user.id);
+        .eq('id', p.id);
 
     if (!error) {
         window.loadHistoryList(true);
@@ -1852,7 +1759,6 @@ async function generateShiftHandoff() {
     const { data: patients, error } = await supabaseClient
         .from('pacientes')
         .select('*')
-        .eq('user_id', AppState.user.id)
         .neq('estado_sala', 'de_alta')
         .order('cama', { ascending: true, nullsFirst: false });
 
@@ -2637,7 +2543,6 @@ window.updatePatientEvolutionChart = async (nombre) => {
     const { data: records, error } = await supabaseClient
         .from('pacientes')
         .select('*, metadata')
-        .eq('user_id', AppState.user.id)
         .eq('nombre', nombre)
         .neq('estado_sala', 'eliminado')
         .order('created_at', { ascending: false });
@@ -7050,7 +6955,16 @@ function initGlobalEvents() {
         // Build VI Clinical Note Text
         const pName = document.getElementById('nombre')?.value || p.nombre || 'Sin nombre';
         const numFicha = document.getElementById('num_ficha')?.value || 'S/N';
-        const antecedentesMorbidos = document.getElementById('antecedentes_morbidos')?.value || 'Sin antecedentes reportados';
+        const antecedentesMorbidos = (() => {
+            const list = [];
+            if (document.getElementById('patologia_dm')?.checked || p.metadata?.patologia_dm) list.push('Diabetes Mellitus (DM)');
+            if (document.getElementById('patologia_hta')?.checked || p.metadata?.patologia_hta) list.push('Hipertensión Arterial (HTA)');
+            if (document.getElementById('patologia_erc')?.checked || p.metadata?.patologia_erc) list.push('Enfermedad Renal Crónica (ERC)');
+            if (p.metadata?.antecedentes_morbidos && !list.some(item => p.metadata.antecedentes_morbidos.includes(item))) {
+                list.push(p.metadata.antecedentes_morbidos);
+            }
+            return list.length > 0 ? list.join(', ') : 'Sin antecedentes crónicos registrados';
+        })();
         const pAgeVal = document.getElementById('edad')?.value || p.edad;
         const pAge = pAgeVal ? `${pAgeVal} años` : (p.exactMonths ? `${p.exactMonths.toFixed(1)} meses` : '--');
         const pSexVal = document.getElementById('sexo')?.value || p.sexo;
@@ -7349,7 +7263,16 @@ Hospital Regional de Antofagasta`;
         const now = new Date();
         const dateStr = now.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
         const numFicha = document.getElementById('num_ficha')?.value || 'S/N';
-        const antecedentesMorbidos = document.getElementById('antecedentes_morbidos')?.value || 'Sin antecedentes reportados';
+        const antecedentesMorbidos = (() => {
+            const list = [];
+            if (document.getElementById('patologia_dm')?.checked || p.metadata?.patologia_dm) list.push('Diabetes Mellitus (DM)');
+            if (document.getElementById('patologia_hta')?.checked || p.metadata?.patologia_hta) list.push('Hipertensión Arterial (HTA)');
+            if (document.getElementById('patologia_erc')?.checked || p.metadata?.patologia_erc) list.push('Enfermedad Renal Crónica (ERC)');
+            if (p.metadata?.antecedentes_morbidos && !list.some(item => p.metadata.antecedentes_morbidos.includes(item))) {
+                list.push(p.metadata.antecedentes_morbidos);
+            }
+            return list.length > 0 ? list.join(', ') : 'Sin antecedentes crónicos registrados';
+        })();
 
         let ageStr = '--';
         if (p.ageParts) {
@@ -10177,8 +10100,7 @@ async function showCensusReviewModal(extracted, bedsList, activeLoc) {
                         </div>`;
                 }
             } else {
-                // Different patient in bed: Move current patient to "Pacientes que ya no están en el servicio" (cama: '')
-                // NEVER discharge automatically!
+                // Different patient in bed: Move previous patient to Papelera (30 days)
                 hasChanges = true;
                 window.pendingCensusChanges.push({
                     type: 'replace',
@@ -10193,13 +10115,13 @@ async function showCensusReviewModal(extracted, bedsList, activeLoc) {
                     observaciones: extPat.observaciones || ''
                 });
                 changesListEl.innerHTML += `
-                    <div style="display:flex; flex-direction:column; gap:6px; background:#fef9e7; border:1px solid #fdebd0; border-radius:8px; padding:10px 12px; font-size:0.85rem; color:#b7950b;">
+                    <div style="display:flex; flex-direction:column; gap:6px; background:#fff1f2; border:1px solid #fecdd3; border-radius:8px; padding:10px 12px; font-size:0.85rem; color:#9f1239;">
                         <div style="display:flex; justify-content:space-between;">
-                            <div><strong style="color:#b9770e;">🔄 Relevo de Cama:</strong> Cama <b>${bedName}</b></div>
+                            <div><strong style="color:#e11d48;">🔄 Relevo de Cama:</strong> Cama <b>${bedName}</b></div>
                             <div><b>${extPat.nombre}</b></div>
                         </div>
-                        <div style="font-size:0.75rem; color:#78350f; border-top:1px dashed #fdebd0; padding-top:4px;">
-                            ℹ️ <i>${currentPat.nombre}</i> se traslada a "Pacientes que ya no están en el servicio" (no se da de alta).
+                        <div style="font-size:0.75rem; color:#be123c; border-top:1px dashed #fecdd3; padding-top:4px;">
+                            🗑️ Anterior paciente: <i>${currentPat.nombre}</i> se traslada a la <b>Papelera (30 días de resguardo)</b>.
                         </div>
                     </div>`;
             }
@@ -10311,10 +10233,13 @@ window.applyCensusChanges = async function() {
                 if (change.edad) pat.edad = change.edad;
             }
         } else if (change.type === 'replace') {
-            // Previous patient moves to floating (cama: '') without discharging
+            // Previous patient moves to trash (30 days auto-purge)
             const oldPat = localPatients.find(p => p.id === change.oldPatientId || p.cama === change.bed);
             if (oldPat) {
                 oldPat.cama = '';
+                oldPat.estado_sala = 'eliminado';
+                oldPat.metadata = oldPat.metadata || {};
+                oldPat.metadata.deleted_at = new Date().toISOString();
             }
             // Admit new patient to bed
             const formattedName = window.formatPatientNameFirst ? window.formatPatientNameFirst(change.name) : change.name;
@@ -10410,9 +10335,15 @@ window.applyCensusChanges = async function() {
                                 }).eq('id', dbId);
                             }
                         } else if (change.type === 'replace') {
-                            // Move old patient to floating
+                            // Move old patient to trash with 30-day expiration
                             if (change.oldPatientId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(change.oldPatientId)) {
-                                await supabaseClient.from('pacientes').update({ cama: '' }).eq('id', change.oldPatientId);
+                                const { data: oldP } = await supabaseClient.from('pacientes').select('metadata').eq('id', change.oldPatientId).maybeSingle();
+                                const oldMeta = { ...(oldP?.metadata || {}), deleted_at: new Date().toISOString() };
+                                await supabaseClient.from('pacientes').update({ 
+                                    cama: '', 
+                                    estado_sala: 'eliminado',
+                                    metadata: oldMeta 
+                                }).eq('id', change.oldPatientId);
                             }
                             // Insert new patient
                             const formattedName = window.formatPatientNameFirst ? window.formatPatientNameFirst(change.name) : change.name;
@@ -12645,6 +12576,7 @@ window.dischargePatientGrid = async function(id) {
             currentMeta = { ...p.metadata };
         }
         currentMeta.discharged_at = nowIso;
+        currentMeta.deleted_at = nowIso;
         if (!currentMeta.first_hospital_admitted_at) {
             currentMeta.first_hospital_admitted_at = currentMeta.fecha_ingreso_servicio || p?.created_at || nowIso;
         }
@@ -12653,7 +12585,7 @@ window.dischargePatientGrid = async function(id) {
         }
         
         const { error } = await supabaseClient.from('pacientes').update({ 
-            estado_sala: 'de_alta',
+            estado_sala: 'eliminado',
             metadata: currentMeta
         }).eq('id', dbId);
         
@@ -12668,9 +12600,9 @@ window.dischargePatientGrid = async function(id) {
         localStorage.setItem('local_ward_patients', JSON.stringify(localCache));
     } catch(e) {}
 
-    showToast("✅ Paciente dado de alta.");
+    showToast("✅ Paciente dado de alta y trasladado a la papelera (30 días).");
     if (typeof window.loadHistoryList === 'function') {
-        await window.loadHistoryList(false);
+        await window.loadHistoryList(true);
     }
     await window.renderWardBedsGrid();
 };
@@ -12797,8 +12729,7 @@ window.updateTransferPatientBedsDropdown = async function() {
             .select('nombre, metadata')
             .eq('cama', bedVal)
             .neq('estado_sala', 'de_alta')
-            .neq('estado_sala', 'eliminado')
-            .eq('user_id', AppState.user.id);
+            .neq('estado_sala', 'eliminado');
 
         let isConflicting = false;
         if (occupiedTarget && occupiedTarget.length > 0) {
