@@ -10101,64 +10101,99 @@ async function showCensusReviewModal(extracted, bedsList, activeLoc) {
     let hasChanges = false;
     let keptCount = 0;
     
+    // Set to track patients that have been transferred to another bed
+    const transferredAwayIds = new Set();
+
     bedsList.forEach(bedName => {
         const currentPat = matchedPatients.find(p => p.cama === bedName);
         const extPat = extracted.find(e => e.cama === bedName);
         const hasExtData = extPat && extPat.nombre && extPat.nombre.trim() !== '';
         
-        if (!currentPat && hasExtData) {
-            // New patient admission
-            hasChanges = true;
-            window.pendingCensusChanges.push({
-                type: 'admission',
-                bed: bedName,
-                name: extPat.nombre.trim(),
-                num_ficha: extPat.num_ficha || '',
-                edad: extPat.edad ? parseInt(extPat.edad) : 0,
-                regimen: extPat.regimen || '',
-                patologia_dm: !!extPat.patologia_dm,
-                observaciones: extPat.observaciones || ''
-            });
-            changesListEl.innerHTML += `
-                <div style="display:flex; justify-content:space-between; align-items:center; background:#e8f8f5; border:1px solid #a3e4d7; border-radius:8px; padding:10px 12px; font-size:0.85rem; color:#16a085;">
-                    <div><strong style="color:#117a65;">🟢 Nuevo Ingreso:</strong> Cama <b>${bedName}</b> ${extPat.num_ficha ? '(Ficha: ' + extPat.num_ficha + ')' : ''}</div>
-                    <div><b>${extPat.nombre}</b></div>
-                </div>`;
-        } else if (currentPat && hasExtData) {
-            if (isSamePatientOrMatch(currentPat, extPat)) {
-                // Same patient! Update diet/regimen/ficha without discharging
-                const newRegimen = extPat.regimen && extPat.regimen !== currentPat.metadata?.regimen;
-                const newFicha = extPat.num_ficha && extPat.num_ficha !== (currentPat.metadata?.num_ficha || '');
-                const newDm = extPat.patologia_dm !== !!currentPat.metadata?.patologia_dm;
-                const newObs = extPat.observaciones && extPat.observaciones !== (currentPat.metadata?.observaciones_generales || '');
+        // If the patient currently in this bed was already detected as transferred to another bed,
+        // treat this bed as effectively vacated
+        const effectiveCurrentPat = (currentPat && !transferredAwayIds.has(currentPat.id)) ? currentPat : null;
+
+        if (hasExtData) {
+            // Check if this incoming patient in bedName already exists elsewhere in the active ward
+            const existingInWard = matchedPatients.find(p => isSamePatientOrMatch(p, extPat));
+
+            if (existingInWard && existingInWard.cama !== bedName) {
+                // 🔄 TRASLADO DE CAMA DETECTADO! (Conserva 100% de la ficha clínica)
+                hasChanges = true;
+                transferredAwayIds.add(existingInWard.id);
+
+                // If another patient was in bedName, check if that previous patient was moved to another bed
+                let displacedPat = null;
+                if (effectiveCurrentPat && effectiveCurrentPat.id !== existingInWard.id) {
+                    const isDisplacedTransferred = extracted.some(e => isSamePatientOrMatch(effectiveCurrentPat, e));
+                    if (!isDisplacedTransferred) {
+                        displacedPat = effectiveCurrentPat;
+                    }
+                }
+
+                window.pendingCensusChanges.push({
+                    type: 'transfer',
+                    patientId: existingInWard.id,
+                    patientName: existingInWard.nombre,
+                    fromBed: existingInWard.cama,
+                    toBed: bedName,
+                    displacedOldPatientId: displacedPat ? displacedPat.id : null,
+                    displacedOldName: displacedPat ? displacedPat.nombre : null,
+                    num_ficha: extPat.num_ficha || existingInWard.metadata?.num_ficha || '',
+                    edad: extPat.edad || existingInWard.edad || 0,
+                    regimen: extPat.regimen || existingInWard.metadata?.regimen || '',
+                    patologia_dm: extPat.patologia_dm !== undefined ? extPat.patologia_dm : !!existingInWard.metadata?.patologia_dm,
+                    observaciones: extPat.observaciones || existingInWard.metadata?.observaciones_generales || ''
+                });
+
+                changesListEl.innerHTML += `
+                    <div style="display:flex; flex-direction:column; gap:4px; background:#f0fdf4; border:1px solid #86efac; border-radius:8px; padding:10px 12px; font-size:0.85rem; color:#15803d;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div><strong style="color:#166534;">🔄 Traslado de Cama:</strong> De <b>${existingInWard.cama}</b> ➔ <b>${bedName}</b></div>
+                            <div><b>${existingInWard.nombre}</b> ${extPat.regimen ? '<span style="font-size:0.75rem; color:#475569;">(' + extPat.regimen + ')</span>' : ''}</div>
+                        </div>
+                        <div style="font-size:0.75rem; color:#15803d; border-top:1px dashed #86efac; padding-top:4px;">
+                            🛡️ <b>Ficha clínica 100% conservada:</b> peso, talla, requerimientos y valoraciones previas se trasladan intactos a la nueva cama.
+                            ${displacedPat ? `<br><span style="color:#be123c;">🗑️ Anterior paciente de ${bedName} (<i>${displacedPat.nombre}</i>) pasa a <b>Papelera (30 días)</b>.</span>` : ''}
+                        </div>
+                    </div>`;
+
+            } else if (effectiveCurrentPat && isSamePatientOrMatch(effectiveCurrentPat, extPat)) {
+                // Same patient in the same bed! Update diet/regimen/ficha without discharging
+                const newRegimen = extPat.regimen && extPat.regimen !== effectiveCurrentPat.metadata?.regimen;
+                const newFicha = extPat.num_ficha && extPat.num_ficha !== (effectiveCurrentPat.metadata?.num_ficha || '');
+                const newDm = extPat.patologia_dm !== !!effectiveCurrentPat.metadata?.patologia_dm;
+                const newObs = extPat.observaciones && extPat.observaciones !== (effectiveCurrentPat.metadata?.observaciones_generales || '');
 
                 if (newRegimen || newFicha || newDm || newObs) {
                     hasChanges = true;
                     window.pendingCensusChanges.push({
                         type: 'update',
                         bed: bedName,
-                        patientId: currentPat.id,
-                        name: currentPat.nombre,
-                        num_ficha: extPat.num_ficha || currentPat.metadata?.num_ficha || '',
-                        edad: extPat.edad || currentPat.edad || 0,
-                        regimen: extPat.regimen || currentPat.metadata?.regimen || '',
-                        patologia_dm: extPat.patologia_dm !== undefined ? extPat.patologia_dm : !!currentPat.metadata?.patologia_dm,
-                        observaciones: extPat.observaciones || currentPat.metadata?.observaciones_generales || ''
+                        patientId: effectiveCurrentPat.id,
+                        name: effectiveCurrentPat.nombre,
+                        num_ficha: extPat.num_ficha || effectiveCurrentPat.metadata?.num_ficha || '',
+                        edad: extPat.edad || effectiveCurrentPat.edad || 0,
+                        regimen: extPat.regimen || effectiveCurrentPat.metadata?.regimen || '',
+                        patologia_dm: extPat.patologia_dm !== undefined ? extPat.patologia_dm : !!effectiveCurrentPat.metadata?.patologia_dm,
+                        observaciones: extPat.observaciones || effectiveCurrentPat.metadata?.observaciones_generales || ''
                     });
                     changesListEl.innerHTML += `
                         <div style="display:flex; justify-content:space-between; align-items:center; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:10px 12px; font-size:0.85rem; color:#1d4ed8;">
                             <div><strong style="color:#1e40af;">🔄 Actualización:</strong> Cama <b>${bedName}</b> (Mismo paciente)</div>
-                            <div><b>${currentPat.nombre}</b> ${extPat.regimen ? '<span style="font-size:0.75rem; color:#475569;">(' + extPat.regimen + ')</span>' : ''}</div>
+                            <div><b>${effectiveCurrentPat.nombre}</b> ${extPat.regimen ? '<span style="font-size:0.75rem; color:#475569;">(' + extPat.regimen + ')</span>' : ''}</div>
                         </div>`;
                 }
-            } else {
-                // Different patient in bed: Move previous patient to Papelera (30 days)
+            } else if (effectiveCurrentPat && !isSamePatientOrMatch(effectiveCurrentPat, extPat)) {
+                // Different patient in bed: check if effectiveCurrentPat was transferred elsewhere in this census
+                const isCurrentTransferred = extracted.some(e => isSamePatientOrMatch(effectiveCurrentPat, e));
+
                 hasChanges = true;
                 window.pendingCensusChanges.push({
                     type: 'replace',
                     bed: bedName,
-                    oldPatientId: currentPat.id,
-                    oldName: currentPat.nombre,
+                    oldPatientId: isCurrentTransferred ? null : effectiveCurrentPat.id,
+                    oldName: isCurrentTransferred ? null : effectiveCurrentPat.nombre,
                     name: extPat.nombre.trim(),
                     num_ficha: extPat.num_ficha || '',
                     edad: extPat.edad ? parseInt(extPat.edad) : 0,
@@ -10172,15 +10207,38 @@ async function showCensusReviewModal(extracted, bedsList, activeLoc) {
                             <div><strong style="color:#e11d48;">🔄 Relevo de Cama:</strong> Cama <b>${bedName}</b></div>
                             <div><b>${extPat.nombre}</b></div>
                         </div>
+                        ${!isCurrentTransferred ? `
                         <div style="font-size:0.75rem; color:#be123c; border-top:1px dashed #fecdd3; padding-top:4px;">
-                            🗑️ Anterior paciente: <i>${currentPat.nombre}</i> se traslada a la <b>Papelera (30 días de resguardo)</b>.
-                        </div>
+                            🗑️ Anterior paciente: <i>${effectiveCurrentPat.nombre}</i> se traslada a la <b>Papelera (30 días de resguardo)</b>.
+                        </div>` : ''}
+                    </div>`;
+            } else if (!effectiveCurrentPat) {
+                // New patient admission
+                hasChanges = true;
+                window.pendingCensusChanges.push({
+                    type: 'admission',
+                    bed: bedName,
+                    name: extPat.nombre.trim(),
+                    num_ficha: extPat.num_ficha || '',
+                    edad: extPat.edad ? parseInt(extPat.edad) : 0,
+                    regimen: extPat.regimen || '',
+                    patologia_dm: !!extPat.patologia_dm,
+                    observaciones: extPat.observaciones || ''
+                });
+                changesListEl.innerHTML += `
+                    <div style="display:flex; justify-content:space-between; align-items:center; background:#e8f8f5; border:1px solid #a3e4d7; border-radius:8px; padding:10px 12px; font-size:0.85rem; color:#16a085;">
+                        <div><strong style="color:#117a65;">🟢 Nuevo Ingreso:</strong> Cama <b>${bedName}</b> ${extPat.num_ficha ? '(Ficha: ' + extPat.num_ficha + ')' : ''}</div>
+                        <div><b>${extPat.nombre}</b></div>
                     </div>`;
             }
-        } else if (currentPat && !hasExtData) {
+        } else if (effectiveCurrentPat && !hasExtData) {
             // Patient currently in bed, but DieTools didn't list this bed:
-            // ALWAYS KEEP THE PATIENT IN BED! NEVER AUTO-DISCHARGE!
-            keptCount++;
+            // Check if this patient was transferred to another bed
+            if (transferredAwayIds.has(effectiveCurrentPat.id)) {
+                // Already transferred to their new bed, so this bed is safely vacated
+            } else {
+                keptCount++;
+            }
         }
     });
 
@@ -10242,39 +10300,41 @@ window.applyCensusChanges = async function() {
     window.pendingCensusChanges = [];
 
     // 2. Update local storage cache INSTANTLY
+    const nowIso = new Date().toISOString();
+
+    // 2a. First, move displaced patients to trash (30 days purge)
     pending.forEach(change => {
-        if (change.type === 'admission') {
-            const formattedName = window.formatPatientNameFirst ? window.formatPatientNameFirst(change.name) : change.name;
-            const newPatientData = {
-                id: 'pat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-                nombre: formattedName,
-                edad: change.edad || 0,
-                peso_kg: 0,
-                estatura_m: 0,
-                sexo: 'm',
-                actividad: 1.2,
-                diagnostico: '',
-                cama: change.bed,
-                estado_sala: 'activo',
-                tmt: 0,
-                ia_report: null,
-                created_at: new Date().toISOString(),
-                user_id: currentUserId || null,
-                metadata: {
-                    num_ficha: change.num_ficha || '',
-                    regimen: change.regimen || '',
-                    patologia_dm: !!change.patologia_dm,
-                    observaciones_generales: change.observaciones || '',
-                    location: {
-                        floor: activeLoc.floor,
-                        serviceId: activeLoc.serviceId,
-                        serviceName: activeLoc.serviceName
-                    }
-                }
-            };
-            localPatients = localPatients.filter(p => p.cama !== change.bed);
-            localPatients.push(newPatientData);
-        } else if (change.type === 'update') {
+        const trashId = change.oldPatientId || change.displacedOldPatientId;
+        if (trashId) {
+            const oldPat = localPatients.find(p => p.id === trashId);
+            if (oldPat) {
+                oldPat.cama = '';
+                oldPat.estado_sala = 'eliminado';
+                oldPat.metadata = oldPat.metadata || {};
+                oldPat.metadata.deleted_at = nowIso;
+            }
+        }
+    });
+
+    // 2b. Second, process transfers (moving patient to their new bed, keeping all clinical data 100% intact)
+    pending.forEach(change => {
+        if (change.type === 'transfer') {
+            const pat = localPatients.find(p => p.id === change.patientId || p.cama === change.fromBed);
+            if (pat) {
+                pat.cama = change.toBed;
+                pat.metadata = pat.metadata || {};
+                if (change.num_ficha) pat.metadata.num_ficha = change.num_ficha;
+                if (change.regimen) pat.metadata.regimen = change.regimen;
+                if (change.patologia_dm !== undefined) pat.metadata.patologia_dm = change.patologia_dm;
+                if (change.observaciones) pat.metadata.observaciones_generales = change.observaciones;
+                if (change.edad) pat.edad = change.edad;
+            }
+        }
+    });
+
+    // 2c. Third, process updates (same patient in same bed)
+    pending.forEach(change => {
+        if (change.type === 'update') {
             const pat = localPatients.find(p => p.id === change.patientId || p.cama === change.bed);
             if (pat) {
                 pat.metadata = pat.metadata || {};
@@ -10284,16 +10344,12 @@ window.applyCensusChanges = async function() {
                 if (change.observaciones) pat.metadata.observaciones_generales = change.observaciones;
                 if (change.edad) pat.edad = change.edad;
             }
-        } else if (change.type === 'replace') {
-            // Previous patient moves to trash (30 days auto-purge)
-            const oldPat = localPatients.find(p => p.id === change.oldPatientId || p.cama === change.bed);
-            if (oldPat) {
-                oldPat.cama = '';
-                oldPat.estado_sala = 'eliminado';
-                oldPat.metadata = oldPat.metadata || {};
-                oldPat.metadata.deleted_at = new Date().toISOString();
-            }
-            // Admit new patient to bed
+        }
+    });
+
+    // 2d. Fourth, process admissions and replaces (brand new patient into bed)
+    pending.forEach(change => {
+        if (change.type === 'admission' || change.type === 'replace') {
             const formattedName = window.formatPatientNameFirst ? window.formatPatientNameFirst(change.name) : change.name;
             const newPatientData = {
                 id: 'pat_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
@@ -10308,7 +10364,7 @@ window.applyCensusChanges = async function() {
                 estado_sala: 'activo',
                 tmt: 0,
                 ia_report: null,
-                created_at: new Date().toISOString(),
+                created_at: nowIso,
                 user_id: currentUserId || null,
                 metadata: {
                     num_ficha: change.num_ficha || '',
@@ -10322,7 +10378,7 @@ window.applyCensusChanges = async function() {
                     }
                 }
             };
-            localPatients = localPatients.filter(p => (oldPat && p.id === oldPat.id) ? true : p.cama !== change.bed);
+            localPatients = localPatients.filter(p => p.estado_sala === 'eliminado' || p.cama !== change.bed);
             localPatients.push(newPatientData);
         }
     });
@@ -10339,7 +10395,33 @@ window.applyCensusChanges = async function() {
             try {
                 const tasks = pending.map(async (change) => {
                     try {
-                        if (change.type === 'admission') {
+                        if (change.type === 'transfer') {
+                            const dbId = change.patientId;
+                            if (dbId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(dbId)) {
+                                const { data: existing } = await supabaseClient.from('pacientes').select('metadata').eq('id', dbId).maybeSingle();
+                                const meta = { ...(existing?.metadata || {}) };
+                                if (change.num_ficha) meta.num_ficha = change.num_ficha;
+                                if (change.regimen) meta.regimen = change.regimen;
+                                if (change.patologia_dm !== undefined) meta.patologia_dm = change.patologia_dm;
+                                if (change.observaciones) meta.observaciones_generales = change.observaciones;
+                                
+                                await supabaseClient.from('pacientes').update({
+                                    cama: change.toBed,
+                                    metadata: meta,
+                                    edad: change.edad || undefined,
+                                    updated_at: new Date().toISOString()
+                                }).eq('id', dbId);
+                            }
+                            if (change.displacedOldPatientId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(change.displacedOldPatientId)) {
+                                const { data: oldP } = await supabaseClient.from('pacientes').select('metadata').eq('id', change.displacedOldPatientId).maybeSingle();
+                                const oldMeta = { ...(oldP?.metadata || {}), deleted_at: new Date().toISOString() };
+                                await supabaseClient.from('pacientes').update({ 
+                                    cama: '', 
+                                    estado_sala: 'eliminado',
+                                    metadata: oldMeta 
+                                }).eq('id', change.displacedOldPatientId);
+                            }
+                        } else if (change.type === 'admission') {
                             const formattedName = window.formatPatientNameFirst ? window.formatPatientNameFirst(change.name) : change.name;
                             const dbPayload = {
                                 nombre: formattedName,
