@@ -6699,17 +6699,18 @@ function updateAnthropometry() {
             const refKey = keys.find(k => age >= k) || keys[keys.length - 1];
             const p = sexRefs[refKey];
 
-            if (val < p.p5) return { status: 'Muy Disminuido', color: '#c0392b', pos: 2.5 };
-            if (val < p.p10) return { status: 'Disminuido', color: '#e67e22', pos: 7.5 };
-            if (val < p.p90) return { status: 'Normal', color: '#27ae60', pos: 50 };
-            if (val <= p.p95) return { status: 'Elevado', color: '#3498db', pos: 92.5 };
-            return { status: 'Muy Elevado', color: '#9b59b6', pos: 97.5 };
+            if (val < p.p5) return { status: 'Muy Disminuido', color: '#c0392b', pos: 2.5, percentile: '<p5' };
+            if (val < p.p10) return { status: 'Disminuido', color: '#e67e22', pos: 7.5, percentile: 'p5-p25' };
+            if (val < p.p90) return { status: 'Normal', color: '#27ae60', pos: 50, percentile: 'p25-50' };
+            if (val <= p.p95) return { status: 'Elevado', color: '#3498db', pos: 92.5, percentile: 'p50-p75' };
+            return { status: 'Muy Elevado', color: '#9b59b6', pos: 97.5, percentile: '>p75' };
         };
 
         const resCB = getPercentileMatch('cb', cb);
         const resAG = getPercentileMatch('ag', ama);
 
         p.cbStatus = resCB.status;
+        p.cbPercentile = resCB.percentile;
         p.amaStatus = ama > 0 ? resAG.status : null;
 
         // Calculate Arm Fat Area (AGB)
@@ -6720,7 +6721,7 @@ function updateAnthropometry() {
             if (agb < 0) agb = 0;
         }
 
-        if (lblCB) lblCB.innerHTML = `<span style="color:${resCB.color}; font-size:0.85rem;">${resCB.status}</span><br><small style="color:#888; font-weight:400;">CB: ${cb} cm</small>`;
+        if (lblCB) lblCB.innerHTML = `<span style="color:${resCB.color}; font-size:0.85rem;">${resCB.status}${resCB.percentile ? ' (' + resCB.percentile + ')' : ''}</span><br><small style="color:#888; font-weight:400;">CB: ${cb} cm</small>`;
         if (lblAMB && ama > 0) lblAMB.innerHTML = `<span style="color:${resAG.color}; font-size:0.85rem;">${resAG.status}</span><br><small style="color:#888; font-weight:400;">AMB: ${ama.toFixed(1)} cm²</small>`;
         else if (lblAMB) lblAMB.innerHTML = "--";
 
@@ -6744,6 +6745,7 @@ function updateAnthropometry() {
         }
     } else {
         p.cbStatus = null;
+        p.cbPercentile = null;
         p.amaStatus = null;
         if (lblCB) lblCB.innerHTML = '--';
         if (lblAMB) lblAMB.innerHTML = '--';
@@ -7551,7 +7553,19 @@ o Interpretación: ${(nrs.classification || 'Sin riesgo nutricional').toUpperCas
         }
         const rawCbInput = document.getElementById('cbraquial')?.value?.trim() || '';
         const cbNumParsed = parseFloat(rawCbInput.replace(',', '.'));
-        const cbClassSuffix = (p.cbStatus && p.cbStatus !== '--') ? ` (${p.cbStatus})` : '';
+        const getCbPercentile = (st) => {
+            if (!st) return '';
+            const s = st.toLowerCase();
+            if (s.includes('muy disminuido')) return '<p5';
+            if (s.includes('disminuido')) return 'p5-p25';
+            if (s.includes('normal')) return 'p25-50';
+            if (s.includes('muy elevado')) return '>p75';
+            if (s.includes('elevado')) return 'p50-p75';
+            return '';
+        };
+        const cbPercentile = p.cbPercentile || getCbPercentile(p.cbStatus);
+        const cbPercentileSuffix = cbPercentile ? ` ${cbPercentile}` : '';
+        const cbClassSuffix = (p.cbStatus && p.cbStatus !== '--') ? ` (${p.cbStatus})${cbPercentileSuffix}` : '';
         const cbStdLine = (rawCbInput && !isNaN(cbNumParsed) && cbNumParsed > 0) ? `${rawCbInput} cm${cbClassSuffix}` : 'No evaluado';
 
         // Diagnostic
@@ -7639,7 +7653,7 @@ Hospital Regional de Antofagasta`;
             const viaAlim = formula ? 'Enteral' : 'oral';
             const transitoNutri = (deposicionesVal === 'Sí' || deposicionesVal === 'Normal') ? '(+) Conservado' : (deposicionesVal === 'No' ? 'Sin deposiciones' : '(+)');
             const tallaCmVal = cm > 0 ? cm : (tallaMt !== '--' ? Math.round(parseFloat(tallaMt) * 100) : '--');
-            const cBraqStr = cBraquialVal && cBraquialVal !== '[Completar]' ? `${cBraquialVal} cm` : 'No evaluado';
+            const cBraqStr = cbStdLine !== 'No evaluado' ? cbStdLine : (cBraquialVal && cBraquialVal !== '[Completar]' ? `${cBraquialVal} cm` : 'No evaluado');
 
             let tamizajeBlock = "";
             if (pMode === 'pediatric' || pMode === 'neonate') {
@@ -7720,7 +7734,7 @@ Antropometría: (Evaluación ${dataAntropoStr.toLowerCase()} por nutricionista d
 o Peso actual: ${pesoFisico} kg
 o Talla: ${tallaMt} mt
 o IMC: ${imcNum > 0 ? imcNum.toFixed(1) : imcVal} kg/m² (${clasifIMC})
-o C. braquial: ${cBraquialVal} cm
+o C. braquial: ${cbStdLine !== 'No evaluado' ? cbStdLine : (cBraquialVal && cBraquialVal !== '[Completar]' ? `${cBraquialVal} cm` : 'No evaluado')}
 o C. cintura: ${cCintura} cm
 
 ${indicadoresText}
