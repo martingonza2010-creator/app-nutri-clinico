@@ -1052,6 +1052,7 @@ function initCompactLayout() {
                     return AppState.patient.metadata?.regimen || '';
                 })();
                 const currentVia = document.getElementById('viaAlimentacionSelect')?.value || (AppState.patient.metadata?.via_alimentacion || 'auto');
+                const activeLocStr = localStorage.getItem('activeLocation');
 
                 const metadata = {
                     patient_type: AppState.patient.type || 'adult',
@@ -1190,49 +1191,67 @@ function initCompactLayout() {
                     diagnostico,
                     cama,
                     tmt,
+                    estado_sala: AppState.patient.estado_sala || 'activo',
                     ia_report: AppState.patient.ia_report || null,
                     metadata: metadata,
                     user_id: AppState.user.id
                 };
-
-                // Update local_ward_patients cache immediately if patient is in ward
-                try {
-                    let localWard = JSON.parse(localStorage.getItem('local_ward_patients') || '[]');
-                    const wIdx = localWard.findIndex(p => p.id === AppState.patient.id || (p.cama && p.cama === cama && cama !== ''));
-                    if (wIdx >= 0) {
-                        localWard[wIdx] = {
-                            ...localWard[wIdx],
-                            nombre,
-                            edad,
-                            peso_kg: peso,
-                            estatura_m: estatura,
-                            talla_cm: Math.round(estatura > 3 ? estatura : estatura * 100),
-                            sexo,
-                            diagnostico,
-                            metadata: {
-                                ...(localWard[wIdx].metadata || {}),
-                                ...metadata
-                            }
-                        };
-                        localStorage.setItem('local_ward_patients', JSON.stringify(localWard));
-                    }
-                } catch(e) {}
 
                 let error = null;
                 if (AppState.patient.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(AppState.patient.id)) {
                     const res = await supabaseClient.from('pacientes').update(data).eq('id', AppState.patient.id);
                     error = res.error;
                 } else {
-                    const res = await supabaseClient.from('pacientes').insert([data]);
+                    const res = await supabaseClient.from('pacientes').insert([data]).select();
                     error = res.error;
                     if (!error && res.data && res.data[0]) {
                         AppState.patient.id = res.data[0].id;
                     }
                 }
 
+                // Update local_ward_patients cache immediately so ward cards reflect the patient
+                try {
+                    let localWard = JSON.parse(localStorage.getItem('local_ward_patients') || '[]');
+                    const wIdx = localWard.findIndex(p => p && (
+                        (AppState.patient.id && p.id === AppState.patient.id) ||
+                        (p.cama && cama && p.cama.trim().toUpperCase() === cama.trim().toUpperCase() && (!p.metadata?.location?.serviceId || !metadata.location?.serviceId || p.metadata.location.serviceId === metadata.location.serviceId))
+                    ));
+                    const wardRecord = {
+                        id: AppState.patient.id || ('pat_' + Date.now()),
+                        nombre,
+                        edad,
+                        peso_kg: peso,
+                        estatura_m: estatura,
+                        talla_cm: Math.round(estatura > 3 ? estatura : estatura * 100),
+                        sexo,
+                        diagnostico,
+                        cama,
+                        tmt,
+                        estado_sala: data.estado_sala,
+                        metadata
+                    };
+                    if (wIdx >= 0) {
+                        localWard[wIdx] = {
+                            ...localWard[wIdx],
+                            ...wardRecord,
+                            id: AppState.patient.id || localWard[wIdx].id,
+                            metadata: {
+                                ...(localWard[wIdx].metadata || {}),
+                                ...metadata
+                            }
+                        };
+                    } else if (cama) {
+                        localWard.push(wardRecord);
+                    }
+                    localStorage.setItem('local_ward_patients', JSON.stringify(localWard));
+                } catch(e) {}
+
                 if (!error) {
-                    showToast("✅ Ficha completa guardada en historial");
-                    window.loadHistoryList(false);
+                    showToast("✅ Paciente guardado correctamente");
+                    window.loadHistoryList(true);
+                    if (typeof window.renderWardBedsGrid === 'function') {
+                        window.renderWardBedsGrid(true);
+                    }
 
                     if (typeof updatePatientEvolutionChart === 'function') {
                         updatePatientEvolutionChart(nombre);
@@ -7528,6 +7547,14 @@ o Interpretación: ${(nrs.classification || 'Sin riesgo nutricional').toUpperCas
         // Biochem parameters
         const evoExamenes = document.getElementById('evoExamenes')?.value || 'Sin reportar';
 
+        if (typeof updateAnthropometry === 'function') {
+            updateAnthropometry();
+        }
+        const rawCbInput = document.getElementById('cbraquial')?.value?.trim() || '';
+        const cbNumParsed = parseFloat(rawCbInput.replace(',', '.'));
+        const cbClassSuffix = (p.cbStatus && p.cbStatus !== '--') ? ` (${p.cbStatus})` : '';
+        const cbStdLine = (rawCbInput && !isNaN(cbNumParsed) && cbNumParsed > 0) ? `${rawCbInput} cm${cbClassSuffix}` : 'No evaluado';
+
         // Diagnostic
         let diagNutri = `Paciente ${pMode === 'pediatric' ? 'pediátrico' : (pMode === 'neonate' ? 'neonato' : 'adulto')} ${sexStr.toLowerCase()} con estado nutricional ${clasifIMC.toLowerCase()} según IMC.`;
         const compBraquialText = p.amaStatus || p.cbStatus ? ` Con compartimiento braquial ${p.amaStatus || p.cbStatus}.` : '';
@@ -7564,6 +7591,7 @@ Datos Antropométricos:  ${dataAntropoStr}
 Peso: ${pesoFisico} kg	
 Talla: ${tallaMt} mt 				
 IMC: ${imcNum > 0 ? imcNum.toFixed(1) : imcVal} kg/m2
+CB: ${cbStdLine}
 Screening nutricional:  ${nrs.score || 0}  pts, ${nrs.score >= 3 ? 'con riesgo de malnutrición.' : 'sin riesgo nutricional.'}  
 
 Valoración de riesgo de LPP: ${riesgoLpp.toUpperCase()}
