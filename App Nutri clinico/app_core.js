@@ -6280,9 +6280,12 @@ function updateCompareResults(k1, p1, c1, l1) {
         const calL = l2 * 9;
         const totalCal = calP + calC + calL || 1;
 
-        document.getElementById('barProtB').style.width = (calP / totalCal * 100) + "%";
-        document.getElementById('barCHOB').style.width = (calC / totalCal * 100) + "%";
-        document.getElementById('barLipB').style.width = (calL / totalCal * 100) + "%";
+        const elBarP = document.getElementById('barProtB');
+        const elBarC = document.getElementById('barCHOB');
+        const elBarL = document.getElementById('barLipB');
+        if (elBarP) elBarP.style.width = (calP / totalCal * 100) + "%";
+        if (elBarC) elBarC.style.width = (calC / totalCal * 100) + "%";
+        if (elBarL) elBarL.style.width = (calL / totalCal * 100) + "%";
     }
 }
 
@@ -7483,8 +7486,10 @@ Hospital Regional de Antofagasta`;
                 if (z !== null && !isNaN(z)) zTallaDisplay = `${z > 0 ? '+' : ''}${z.toFixed(2)}`;
             }
         }
-        const zImcVal = (document.getElementById('valZBMI')?.innerText && document.getElementById('valZBMI')?.innerText !== '--') ? document.getElementById('valZBMI').innerText : zImcDisplay;
-        const zTallaVal = (document.getElementById('valZHFA')?.innerText && document.getElementById('valZHFA')?.innerText !== '--') ? document.getElementById('valZHFA').innerText : zTallaDisplay;
+        const zImcRaw = document.getElementById('valZBMI')?.innerText;
+        const zImcVal = (zImcRaw && zImcRaw !== '--') ? zImcRaw : zImcDisplay;
+        const zTallaRaw = document.getElementById('valZHFA')?.innerText;
+        const zTallaVal = (zTallaRaw && zTallaRaw !== '--') ? zTallaRaw : zTallaDisplay;
 
 
 
@@ -8456,11 +8461,15 @@ function addExamRow() {
 }
 
 function calcNitrogenBalance() {
-    const nuu = parseFloat(document.getElementById('valNUU').value);
-    const protIngested = parseFloat(document.getElementById('valProt').innerText); // From simulator
-    const factor = parseFloat(document.getElementById('valNFactor').value) || 4;
-
+    const elNUU = document.getElementById('valNUU');
+    const elProt = document.getElementById('valProt');
+    const elFactor = document.getElementById('valNFactor');
     const resDiv = document.getElementById('bnResult');
+    if (!elNUU || !elProt || !resDiv) return;
+
+    const nuu = parseFloat(elNUU.value);
+    const protIngested = parseFloat(elProt.innerText); // From simulator
+    const factor = parseFloat(elFactor?.value) || 4;
 
     if (!nuu || !protIngested) {
         resDiv.innerText = "Faltan datos (NUU o Prot)";
@@ -11069,12 +11078,17 @@ window.quickUpdatePatientField = async function(id, field, value) {
             else if (field === 'edad') updateObj.edad = value ? parseInt(value) : 0;
             else if (field === 'sexo') updateObj.sexo = value;
             else if (field === 'peso_kg') {
-                const pKg = value ? parseFloat(value) : null;
+                const pKg = value ? parseFloat(String(value).replace(',', '.')) : null;
                 updateObj.peso_kg = pKg;
                 const { meters } = window.parseSmartHeight(p.estatura_m || p.talla_cm);
                 if (meters > 0 && pKg > 0) {
                     updatedMetadata.imc = parseFloat((pKg / (meters * meters)).toFixed(1));
                     updatedMetadata.estado_nutricional = window.computeNutritionalStatusAbbrev(updatedMetadata.imc, p.edad).abbrev;
+                    updateObj.imc = updatedMetadata.imc;
+                    updateObj.bmi = updatedMetadata.imc;
+                } else {
+                    updateObj.imc = null;
+                    updateObj.bmi = null;
                 }
                 updateObj.metadata = updatedMetadata;
             } else if (field === 'talla_cm' || field === 'estatura_m') {
@@ -11084,6 +11098,11 @@ window.quickUpdatePatientField = async function(id, field, value) {
                 if (p.peso_kg && meters > 0) {
                     updatedMetadata.imc = parseFloat((p.peso_kg / (meters * meters)).toFixed(1));
                     updatedMetadata.estado_nutricional = window.computeNutritionalStatusAbbrev(updatedMetadata.imc, p.edad).abbrev;
+                    updateObj.imc = updatedMetadata.imc;
+                    updateObj.bmi = updatedMetadata.imc;
+                } else {
+                    updateObj.imc = null;
+                    updateObj.bmi = null;
                 }
                 updateObj.metadata = updatedMetadata;
             } else if (field === 'num_ficha') {
