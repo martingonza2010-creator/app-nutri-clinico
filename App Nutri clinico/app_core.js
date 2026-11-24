@@ -883,7 +883,18 @@ function initHistoryModal() {
         modal.classList.add('active');
         window.loadHistoryList(true);
     };
-    if (btnClose) btnClose.onclick = () => modal.classList.remove('active');
+    if (btnClose) btnClose.onclick = () => {
+        if (modal) modal.classList.remove('active');
+        window.restrictedHistoryWard = null;
+    };
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.remove('active');
+                window.restrictedHistoryWard = null;
+            }
+        });
+    }
 
     const tabActivos = document.getElementById('tabHistActivos');
     const tabPapelera = document.getElementById('tabHistPapelera');
@@ -1325,7 +1336,9 @@ window.loadHistoryList = async (showPapelera = true) => {
     }
 
     if (!records || records.length === 0) {
-        list.innerHTML = '<p style="text-align:center; opacity:0.6;">La papelera está vacía.</p>';
+        list.innerHTML = '<p style="text-align:center; opacity:0.6; padding: 25px;">No hay registros en el historial.</p>';
+        const countEl = document.getElementById('historyRecordCount');
+        if (countEl) countEl.innerText = '0 pacientes';
         return;
     }
 
@@ -1334,11 +1347,15 @@ window.loadHistoryList = async (showPapelera = true) => {
         const activeLocStr = localStorage.getItem('activeLocation');
         if (activeLocStr) {
             const activeLoc = JSON.parse(activeLocStr);
-            validRecords = validRecords.filter(r => 
-                r.metadata?.location &&
-                r.metadata.location.floor === activeLoc.floor &&
-                r.metadata.location.serviceId === activeLoc.serviceId
-            );
+            validRecords = validRecords.filter(r => {
+                if (r.metadata?.location) {
+                    const matchService = (r.metadata.location.serviceId && r.metadata.location.serviceId === activeLoc.serviceId) ||
+                                         (r.metadata.location.serviceName && r.metadata.location.serviceName === activeLoc.serviceName);
+                    const matchFloor = !activeLoc.floor || !r.metadata.location.floor || String(r.metadata.location.floor) === String(activeLoc.floor);
+                    return matchService && matchFloor;
+                }
+                return false;
+            });
         }
     }
     const now = new Date();
@@ -1375,6 +1392,13 @@ window.loadHistoryList = async (showPapelera = true) => {
     toHardDelete.forEach(async (id) => {
         console.log(`Auto-purging expired patient ${id}`);
         await supabaseClient.from('pacientes').delete().eq('id', id);
+    });
+
+    // Sort: most recent exit date first
+    showRecords.sort((a, b) => {
+        const dateA = new Date(a.metadata?.deleted_at || a.metadata?.discharged_at || a.created_at || 0);
+        const dateB = new Date(b.metadata?.deleted_at || b.metadata?.discharged_at || b.created_at || 0);
+        return dateB - dateA;
     });
 
     // Save globally so we can filter client-side
@@ -1450,31 +1474,117 @@ window.renderFilteredHistory = () => {
         }
     }
 
-    if (filtered.length === 0) {
-        list.innerHTML = '<p style="text-align:center; opacity:0.6; padding:20px;">La papelera está vacía. No hay pacientes en espera de eliminación.</p>';
-        return;
+    // Filter by live search input
+    const searchTerm = (document.getElementById('historySearchInput')?.value || '').trim().toLowerCase();
+    if (searchTerm) {
+        filtered = filtered.filter(r => {
+            const name = (r.nombre || '').toLowerCase();
+            const cama = (r.cama || '').toLowerCase();
+            const ficha = (r.metadata?.num_ficha || '').toString().toLowerCase();
+            const diag = (r.diagnostico || r.metadata?.diagnostico || '').toLowerCase();
+            const reg = (r.metadata?.regimen || r.regimen || '').toLowerCase();
+            return name.includes(searchTerm) || cama.includes(searchTerm) || ficha.includes(searchTerm) || diag.includes(searchTerm) || reg.includes(searchTerm);
+        });
     }
 
-    let trashHtml = '';
-    filtered.forEach(r => {
-        const dateObj = new Date(r.metadata?.deleted_at || r.metadata?.discharged_at || r.created_at);
-        const dateStr = dateObj.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
-        const sName = r.metadata?.location?.serviceName ? ` | ${r.metadata.location.serviceName}` : '';
-        const bedInfo = r.cama ? ` | Cama: ${r.cama}` : '';
-        trashHtml += `
-            <div class="history-card trash" style="background:#fffaf8; border:1px solid #fed7aa; border-radius:12px; padding:12px 16px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-                <div style="display:flex; flex-direction:column; gap:4px; flex:1;">
-                    <strong style="color:#7c2d12; font-size:0.95rem;">${r.nombre} (Ficha: ${r.metadata?.num_ficha || '--'})</strong>
-                    <span style="font-size:0.75rem; color:#9a3412;">⚠️ Se eliminará definitivamente en <b>${r._daysLeft} días</b> | Salida: ${dateStr}${sName}${bedInfo}</span>
-                </div>
-                <div style="display:flex; gap:6px; align-items:center;">
-                    <button class="btn-primary" style="padding: 5px 12px; font-size: 0.75rem; background:#10b981; border:none; color:white; border-radius:6px; cursor:pointer;" onclick="window.restorePatient('${r.id}')">↩ Restaurar a Sala</button>
-                    <button class="btn-micro" style="padding: 6px; font-size: 0.85rem; background: rgba(239, 68, 68, 0.08); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 6px; cursor:pointer;" onclick="event.stopPropagation(); window.hardDeletePatient('${r.id}')" title="Eliminar definitivamente ahora">🗑</button>
+    // Update count indicator
+    const countEl = document.getElementById('historyRecordCount');
+    if (countEl) {
+        countEl.innerText = `${filtered.length} paciente${filtered.length === 1 ? '' : 's'}`;
+    }
+
+    if (filtered.length === 0) {
+        list.innerHTML = `
+            <div style="text-align: center; padding: 45px 20px; color: #64748b;">
+                <div style="font-size: 2.2rem; margin-bottom: 8px;">📭</div>
+                <div style="font-size: 0.95rem; font-weight: 700; color: #334155;">No hay pacientes relevados en esta vista</div>
+                <div style="font-size: 0.8rem; margin-top: 4px; color: #64748b;">
+                    ${searchTerm ? 'No se encontraron coincidencias con tu búsqueda.' : 'Los pacientes que egresen o sean relevados del servicio durante los últimos 30 días aparecerán aquí.'}
                 </div>
             </div>
         `;
+        return;
+    }
+
+    let rowsHtml = '';
+    filtered.forEach((r, idx) => {
+        const dateObj = new Date(r.metadata?.deleted_at || r.metadata?.discharged_at || r.created_at);
+        const dateStr = !isNaN(dateObj) ? dateObj.toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '--';
+        const timeStr = !isNaN(dateObj) ? dateObj.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }) : '';
+
+        const camaText = r.cama ? r.cama : 'S/C';
+        const fichaText = r.metadata?.num_ficha ? `#${r.metadata.num_ficha}` : 'Sin ficha';
+        const edadText = r.edad ? `${r.edad}a` : '';
+        const regimenText = r.metadata?.regimen || r.regimen || '';
+        const daysLeft = r._daysLeft !== undefined ? r._daysLeft : 30;
+
+        let badgeStyle = 'background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca;';
+        if (daysLeft > 15) {
+            badgeStyle = 'background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0;';
+        } else if (daysLeft > 5) {
+            badgeStyle = 'background: #fffbeb; color: #b45309; border: 1px solid #fde68a;';
+        }
+
+        const rowBg = idx % 2 === 0 ? '#ffffff' : '#f8fafc';
+
+        rowsHtml += `
+            <tr style="background: ${rowBg}; border-bottom: 1px solid #e2e8f0; transition: background 0.12s;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='${rowBg}'">
+                <td style="padding: 6px 10px; vertical-align: middle;">
+                    <span style="display: inline-block; background: #e0e7ff; color: #3730a3; font-weight: 800; font-size: 0.8rem; padding: 2px 7px; border-radius: 6px; letter-spacing: 0.3px; border: 1px solid #c7d2fe; white-space: nowrap;">
+                        🛏️ ${camaText}
+                    </span>
+                </td>
+                <td style="padding: 6px 10px; vertical-align: middle;">
+                    <div style="font-weight: 700; color: #0f172a; font-size: 0.84rem; line-height: 1.2;">
+                        ${r.nombre}
+                    </div>
+                    <div style="font-size: 0.72rem; color: #64748b; margin-top: 2px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;">
+                        <span>Ficha: <strong style="color: #334155;">${fichaText}</strong></span>
+                        ${edadText ? `<span>• ${edadText}</span>` : ''}
+                        ${regimenText ? `<span style="background: #e0f2fe; color: #0369a1; padding: 1px 5px; border-radius: 4px; font-weight: 600;">${regimenText}</span>` : ''}
+                    </div>
+                </td>
+                <td style="padding: 6px 10px; vertical-align: middle; font-size: 0.76rem; color: #475569; white-space: nowrap;">
+                    <span style="font-weight: 600; color: #1e293b;">📅 ${dateStr}</span>
+                    ${timeStr ? `<div style="font-size: 0.68rem; color: #94a3b8;">${timeStr} hrs</div>` : ''}
+                </td>
+                <td style="padding: 6px 10px; vertical-align: middle; white-space: nowrap;">
+                    <span style="display: inline-flex; align-items: center; gap: 3px; font-size: 0.72rem; font-weight: 700; padding: 2px 7px; border-radius: 12px; ${badgeStyle}">
+                        ⏳ ${daysLeft}d rest.
+                    </span>
+                </td>
+                <td style="padding: 6px 10px; vertical-align: middle; text-align: right; white-space: nowrap;">
+                    <button class="btn-micro" style="background: #059669; color: white; border: none; padding: 4px 9px; border-radius: 5px; font-weight: 700; font-size: 0.74rem; cursor: pointer; margin-right: 4px; display: inline-flex; align-items: center; gap: 3px;" onclick="window.restorePatient('${r.id}')" title="Reingresar paciente a la sala activa">
+                        ↩ Restaurar
+                    </button>
+                    <button class="btn-micro" style="background: #fee2e2; color: #dc2626; border: 1px solid #fca5a5; padding: 4px 7px; border-radius: 5px; font-size: 0.74rem; cursor: pointer;" onclick="event.stopPropagation(); window.hardDeletePatient('${r.id}')" title="Eliminar de forma permanente">
+                        🗑
+                    </button>
+                </td>
+            </tr>
+        `;
     });
-    list.innerHTML = trashHtml;
+
+    list.innerHTML = `
+        <div style="border: 1px solid #cbd5e1; border-radius: 8px; overflow: hidden; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+            <div style="max-height: calc(100vh - 250px); overflow-y: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.82rem; text-align: left;">
+                    <thead style="position: sticky; top: 0; background: #f1f5f9; z-index: 2; border-bottom: 2px solid #cbd5e1;">
+                        <tr>
+                            <th style="padding: 7px 10px; color: #334155; font-weight: 800; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; width: 85px;">CAMA</th>
+                            <th style="padding: 7px 10px; color: #334155; font-weight: 800; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px;">PACIENTE Y FICHA</th>
+                            <th style="padding: 7px 10px; color: #334155; font-weight: 800; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; width: 110px;">FECHA SALIDA</th>
+                            <th style="padding: 7px 10px; color: #334155; font-weight: 800; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; width: 115px;">EXPIRACIÓN</th>
+                            <th style="padding: 7px 10px; color: #334155; font-weight: 800; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.5px; text-align: right; width: 140px;">ACCIONES</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${rowsHtml}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    `;
 };
 
 
@@ -1696,16 +1806,24 @@ window.restorePatient = async (id) => {
         }
     }
 
+    const updatedMeta = { ...(p.metadata || {}) };
+    delete updatedMeta.deleted_at;
+    delete updatedMeta.discharged_at;
+    updatedMeta.restored_at = new Date().toISOString();
+
     const { error } = await supabaseClient
         .from('pacientes')
         .update({ 
             estado_sala: 'activo',
-            cama: targetBed
+            cama: targetBed,
+            metadata: updatedMeta
         })
-        .eq('id', p.id);
+        .eq('id', id);
 
     if (!error) {
+        showToast(`↩️ ¡${p.nombre} reingresado a la sala activa!`);
         window.loadHistoryList(true);
+        if (typeof window.renderWardBedsGrid === 'function') window.renderWardBedsGrid();
         if (typeof loadWardKanban === 'function') loadWardKanban();
     } else {
         alert("Error restaurando paciente: " + error.message);
@@ -9654,11 +9772,14 @@ window.restrictedHistoryWard = null;
 
 window.openWardHistory = () => {
     const activeLocStr = localStorage.getItem('activeLocation');
-    if (!activeLocStr) return;
+    if (!activeLocStr) {
+        alert("Por favor selecciona un piso y servicio primero en la vista de sala.");
+        return;
+    }
     const activeLoc = JSON.parse(activeLocStr);
     
     // Set restriction flag
-    window.restrictedHistoryWard = activeLoc.serviceName;
+    window.restrictedHistoryWard = activeLoc.serviceName || activeLoc.serviceId;
     
     // Open modal
     const modal = document.getElementById('historyModal');
@@ -9667,16 +9788,20 @@ window.openWardHistory = () => {
     // Show ward label and hide main filter dropdown
     const subtitle = document.getElementById('lblHistoryWardSubtitle');
     if (subtitle) {
-        subtitle.innerText = `Sala: ${activeLoc.serviceName}`;
+        subtitle.innerText = `Pabellón / Sala: ${activeLoc.serviceName || activeLoc.serviceId} (${activeLoc.floor})`;
         subtitle.style.display = 'block';
     }
     const filterContainer = document.getElementById('historyFilterContainer');
     if (filterContainer) {
         filterContainer.style.display = 'none';
     }
+
+    // Reset search input
+    const searchInput = document.getElementById('historySearchInput');
+    if (searchInput) searchInput.value = '';
     
-    // Load history
-    window.loadHistoryList(false);
+    // Load history (true loads the 30-day discharged/displaced patients)
+    window.loadHistoryList(true);
 };
 // ==========================================
 // MULTIMODAL OCR CENSUS IMPORT SYSTEM (V4.90)
