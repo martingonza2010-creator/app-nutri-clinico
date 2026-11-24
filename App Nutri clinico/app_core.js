@@ -1043,15 +1043,31 @@ function initCompactLayout() {
             }
 
             try {
-                const nombre = document.getElementById('nombre').value;
-                const edad = parseInt(document.getElementById('edad').value) || 0;
-                const peso = parseFloat(document.getElementById('peso').value) || 0;
-                const estatura = parseFloat(document.getElementById('estatura').value) || 0;
-                const sexo = document.getElementById('sexo').value;
-                const actividad = parseFloat(document.getElementById('actividad').value) || 1.2;
+                const nombre = document.getElementById('nombre')?.value?.trim() || 'Sin Nombre';
+                const edad = parseInt(document.getElementById('edad')?.value) || 0;
+
+                const rawPesoStr = (document.getElementById('peso')?.value || '').toString().replace(',', '.').trim();
+                const parsedPeso = parseFloat(rawPesoStr);
+                const peso = (!isNaN(parsedPeso) && parsedPeso > 0) ? parsedPeso : null;
+
+                const rawTallaStr = (document.getElementById('estatura')?.value || '').toString().trim();
+                const { meters: hM, cm: hCm } = (typeof window.parseSmartHeight === 'function')
+                    ? window.parseSmartHeight(rawTallaStr)
+                    : { meters: parseFloat(rawTallaStr.replace(',', '.')) || 0, cm: 0 };
+                const estatura = (hM > 0) ? hM : null;
+                const tallaCm = (hCm > 0) ? hCm : (estatura ? Math.round(estatura * 100) : null);
+
+                const sexo = document.getElementById('sexo')?.value || 'm';
+                const actividad = parseFloat(document.getElementById('actividad')?.value) || 1.2;
                 const diagnostico = document.getElementById('diagnostico')?.value || '';
                 const cama = document.getElementById('cama')?.value || '';
-                const tmt = parseFloat(document.getElementById('goalTotal')?.value) || 0;
+
+                const rawTmt = parseFloat(document.getElementById('goalTotal')?.value);
+                const tmt = (!isNaN(rawTmt) && rawTmt > 0) ? rawTmt : null;
+
+                const imcVal = (peso && estatura && estatura > 0)
+                    ? parseFloat((peso / (estatura * estatura)).toFixed(1))
+                    : null;
 
                 // FULL STATE PERSISTENCE V3.51
                 const currentRegimen = (() => {
@@ -1192,11 +1208,18 @@ function initCompactLayout() {
                     }
                 };
 
+                if (metadata) {
+                    metadata.imc = imcVal;
+                }
+
                 const data = {
                     nombre,
                     edad,
                     peso_kg: peso,
                     estatura_m: estatura,
+                    talla_cm: tallaCm,
+                    imc: imcVal,
+                    bmi: imcVal,
                     sexo,
                     actividad,
                     diagnostico,
@@ -1231,13 +1254,13 @@ function initCompactLayout() {
                         id: AppState.patient.id || ('pat_' + Date.now()),
                         nombre,
                         edad,
-                        peso_kg: peso,
-                        estatura_m: estatura,
-                        talla_cm: Math.round(estatura > 3 ? estatura : estatura * 100),
+                        peso_kg: peso || 0,
+                        estatura_m: estatura || 0,
+                        talla_cm: tallaCm || 0,
                         sexo,
                         diagnostico,
                         cama,
-                        tmt,
+                        tmt: tmt || 0,
                         estado_sala: data.estado_sala,
                         metadata
                     };

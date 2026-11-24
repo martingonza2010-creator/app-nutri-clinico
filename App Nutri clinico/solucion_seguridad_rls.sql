@@ -17,6 +17,16 @@
 -- 1. TABLA 'pacientes' (Censo Clínico de Sala, Diagnósticos, Evaluaciones)
 ALTER TABLE IF EXISTS public.pacientes ENABLE ROW LEVEL SECURITY;
 
+-- 1.1 ELIMINAR CUALQUIER TRIGGER OBSOLETO QUE CAUSE 'division by zero' AL GUARDAR
+-- Si existía un trigger en Supabase que calculaba IMC dividiendo por estatura_m o peso_kg,
+-- lo eliminamos para evitar divisiones por cero cuando la talla no está ingresada o es 0:
+DROP TRIGGER IF EXISTS trigger_calcular_imc ON public.pacientes;
+DROP TRIGGER IF EXISTS trg_calcular_imc ON public.pacientes;
+DROP TRIGGER IF EXISTS trg_pacientes_imc ON public.pacientes;
+DROP TRIGGER IF EXISTS calc_imc_trigger ON public.pacientes;
+DROP TRIGGER IF EXISTS trigger_imc ON public.pacientes;
+DROP TRIGGER IF EXISTS trigger_bmi ON public.pacientes;
+
 -- Eliminar políticas restrictivas previas si existían
 DROP POLICY IF EXISTS "Permitir todo a usuarios autenticados en pacientes" ON public.pacientes;
 DROP POLICY IF EXISTS "Users can only see their own patients" ON public.pacientes;
