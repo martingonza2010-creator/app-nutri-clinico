@@ -6700,10 +6700,10 @@ function updateAnthropometry() {
             const p = sexRefs[refKey];
 
             if (val < p.p5) return { status: 'Muy Disminuido', color: '#c0392b', pos: 2.5, percentile: '<p5' };
-            if (val < p.p10) return { status: 'Disminuido', color: '#e67e22', pos: 7.5, percentile: 'p5-p25' };
-            if (val < p.p90) return { status: 'Normal', color: '#27ae60', pos: 50, percentile: 'p25-50' };
-            if (val <= p.p95) return { status: 'Elevado', color: '#3498db', pos: 92.5, percentile: 'p50-p75' };
-            return { status: 'Muy Elevado', color: '#9b59b6', pos: 97.5, percentile: '>p75' };
+            if (val < p.p10) return { status: 'Disminuido', color: '#e67e22', pos: 7.5, percentile: 'p5-<p10' };
+            if (val < p.p90) return { status: 'Normal', color: '#27ae60', pos: 50, percentile: 'p10-<p90' };
+            if (val <= p.p95) return { status: 'Elevado', color: '#3498db', pos: 92.5, percentile: 'p90-p95' };
+            return { status: 'Muy Elevado', color: '#9b59b6', pos: 97.5, percentile: '>p95' };
         };
 
         const resCB = getPercentileMatch('cb', cb);
@@ -7557,10 +7557,10 @@ o Interpretación: ${(nrs.classification || 'Sin riesgo nutricional').toUpperCas
             if (!st) return '';
             const s = st.toLowerCase();
             if (s.includes('muy disminuido')) return '<p5';
-            if (s.includes('disminuido')) return 'p5-p25';
-            if (s.includes('normal')) return 'p25-50';
-            if (s.includes('muy elevado')) return '>p75';
-            if (s.includes('elevado')) return 'p50-p75';
+            if (s.includes('disminuido')) return 'p5-<p10';
+            if (s.includes('normal')) return 'p10-<p90';
+            if (s.includes('muy elevado')) return '>p95';
+            if (s.includes('elevado')) return 'p90-p95';
             return '';
         };
         const cbPercentile = p.cbPercentile || getCbPercentile(p.cbStatus);
