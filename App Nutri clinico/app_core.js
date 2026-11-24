@@ -7464,10 +7464,11 @@ Hospital Regional de Antofagasta`;
         // Dynamic Anthropometric Indicators & Screening based on Patient Mode
         const pMode = p.type || 'adult';
         const ageValYears = parseFloat(document.getElementById('edad')?.value) || p.edad || 0;
+        const isElderly = ageValYears >= 65;
 
         let indicadoresText = "";
         let tamizajeText = "";
-        let clasifIMC = "Normal / Eutrófico";
+        let clasifIMC = "Normal";
         let imcNum = parseFloat(imcVal) || (typeof calculatedBmi !== 'undefined' ? calculatedBmi : 0) || (pesoFisico > 0 && cm > 0 ? (pesoFisico / Math.pow(parseFloat(cm) / 100, 2)) : 0);
 
         if (pMode === 'pediatric') {
@@ -7503,14 +7504,12 @@ o Interpretación: Evaluación según Edad Gestacional y Curvas de Crecimiento I
 
         } else {
             // Adult or Adulto Mayor
-            const isElderly = ageValYears >= 65;
-            
-            clasifIMC = "Normal / Eutrófico";
+            clasifIMC = "Normal";
             if (isElderly) {
                 // MINSAL Adulto Mayor Criteria (<23 Enflaquecido, 23-27.9 Normal, 28-31.9 Sobrepeso, >=32 Obeso)
                 if (imcNum > 0) {
                     if (imcNum < 23) clasifIMC = "Enflaquecido / Deficitario";
-                    else if (imcNum < 28) clasifIMC = "Normal / Eutrófico";
+                    else if (imcNum < 28) clasifIMC = "Normal";
                     else if (imcNum < 32) clasifIMC = "Sobrepeso";
                     else clasifIMC = "Obeso";
                 }
@@ -7518,7 +7517,7 @@ o Interpretación: Evaluación según Edad Gestacional y Curvas de Crecimiento I
                 // OMS Adult Criteria (<18.5 Bajo Peso, 18.5-24.9 Normal, 25-29.9 Sobrepeso, >=30 Obesidad)
                 if (imcNum > 0) {
                     if (imcNum < 18.5) clasifIMC = "Bajo Peso / Desnutrición";
-                    else if (imcNum < 25) clasifIMC = "Eutrófico / Normal";
+                    else if (imcNum < 25) clasifIMC = "Normal";
                     else if (imcNum < 30) clasifIMC = "Sobrepeso";
                     else if (imcNum < 35) clasifIMC = "Obesidad Grado I";
                     else if (imcNum < 40) clasifIMC = "Obesidad Grado II";
@@ -7556,9 +7555,18 @@ o Interpretación: ${(nrs.classification || 'Sin riesgo nutricional').toUpperCas
         const cbStdLine = (rawCbInput && !isNaN(cbNumParsed) && cbNumParsed > 0) ? `${rawCbInput} cm${cbClassSuffix}` : 'No evaluado';
 
         // Diagnostic
-        let diagNutri = `Paciente ${pMode === 'pediatric' ? 'pediátrico' : (pMode === 'neonate' ? 'neonato' : 'adulto')} ${sexStr.toLowerCase()} con estado nutricional ${clasifIMC.toLowerCase()} según IMC.`;
-        const compBraquialText = p.amaStatus || p.cbStatus ? ` Con compartimiento braquial ${p.amaStatus || p.cbStatus}.` : '';
-        if (compBraquialText) diagNutri += compBraquialText;
+        let patientLabel = "adulto";
+        if (pMode === 'pediatric') {
+            patientLabel = "pediátrico";
+        } else if (pMode === 'neonate') {
+            patientLabel = "neonato";
+        } else if (isElderly) {
+            patientLabel = "adulto mayor";
+        }
+
+        const compBraquialVal = p.amaStatus || p.cbStatus;
+        const compBraquialText = (compBraquialVal && compBraquialVal !== '--') ? `, con compartimiento braquial ${compBraquialVal.toLowerCase()}` : '';
+        let diagNutri = `Paciente ${patientLabel} ${sexStr.toLowerCase()} con estado nutricional ${clasifIMC.toLowerCase()} según IMC${compBraquialText}.`;
         if (des && des !== 'Sin diagnóstico ingresado') {
             diagNutri = des;
         }
@@ -7567,11 +7575,13 @@ o Interpretación: ${(nrs.classification || 'Sin riesgo nutricional').toUpperCas
         const factorKcalVal = reqs.factorKcalVal || (pesoCalc > 0 && goal > 0 ? (goal / pesoCalc).toFixed(0) : 0);
         const factorProtVal = reqs.factorProtVal || (pesoCalc > 0 && pTotal > 0 ? (pTotal / pesoCalc).toFixed(1) : 0);
 
-        // Aporte
+        // Aporte & Ingesta Oral
         const curKcal = document.getElementById('valKcal')?.innerText || '0';
         const curProt = document.getElementById('valProt')?.innerText || '0';
         const curCho = document.getElementById('valCHO')?.innerText || '0';
         const curLip = document.getElementById('valLip')?.innerText || '0';
+        const intakePercent = document.getElementById('oralIntakePercent')?.value || '100';
+        const intakeMention = `(Paciente consume el ${intakePercent}% de su ingesta alimentaria según régimen)`;
 
         // Format selection
         const selFormatEl = document.getElementById('vgoFormatSelect');
@@ -7605,7 +7615,7 @@ REQUERIMIENTOS NUTRICIONALES
 Calorías: ${Math.round(goal)} kcals (${factorKcalVal} kcal/kg peso)
 Proteínas: ${pTotal.toFixed(1)} gr        (${factorProtVal} gr/kg peso)
 
-Aporte: ${curKcal} kcals, ${curProt} gr prot, ${curCho} gr cho, ${curLip} gr lip
+Aporte: ${curKcal} kcals, ${curProt} gr prot, ${curCho} gr cho, ${curLip} gr lip ${intakeMention}
 
 DIETOTERAPIA: 
 ${dietoterapiaStr}
@@ -7734,7 +7744,7 @@ o Proteínas: ${pTotal.toFixed(1)} gr -> VCT ${pPct} % (${factorProtVal} g/kg)
 o Carbohidratos: ${cTotal.toFixed(1)} gr -> VCT ${cPct} %
 o Lípidos: ${lTotal.toFixed(1)} gr -> VCT ${lPct} %
 
-Aporte actual: ${curKcal} kcal | P: ${curProt} g | CHO: ${curCho} g | LIP: ${curLip} g
+Aporte actual: ${curKcal} kcal | P: ${curProt} g | CHO: ${curCho} g | LIP: ${curLip} g ${intakeMention}
 
 Dietoterapia actual:
 o ${dietoterapiaStr}
